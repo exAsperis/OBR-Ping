@@ -11,7 +11,6 @@ export function usePingRoom() {
   const [currentPlayer, setCurrentPlayer] = useState<Participant>({ id: "", name: "" });
   const [players, setPlayers] = useState<Participant[]>([]);
   const [metadata, setMetadata] = useState<Metadata>({});
-  const [sceneReady, setSceneReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const active = useRef(false);
 
@@ -21,18 +20,18 @@ export function usePingRoom() {
   }, []);
 
   const refresh = useCallback(async () => {
-    const [nextRole, name, party, roomMetadata, nextSceneReady] = await Promise.all([OBR.player.getRole(), OBR.player.getName(), OBR.party.getPlayers(), OBR.room.getMetadata(), OBR.scene.isReady()]);
+    const [nextRole, name, party, roomMetadata] = await Promise.all([OBR.player.getRole(), OBR.player.getName(), OBR.party.getPlayers(), OBR.room.getMetadata()]);
     if (!active.current) return;
     const self = { id: OBR.player.id, name: name || "Unnamed player" };
-    setRole(nextRole); setCurrentPlayer(self); setParty(party, self); setMetadata(roomMetadata); setSceneReady(nextSceneReady); setError(null); setStatus("ready");
+    setRole(nextRole); setCurrentPlayer(self); setParty(party, self); setMetadata(roomMetadata); setError(null); setStatus("ready");
   }, [setParty]);
 
   useEffect(() => {
     active.current = true;
     const cleanups: Array<() => void> = [];
-    const timeout = window.setTimeout(() => { if (active.current) { setError("Open OBR Ping inside an Owlbear Rodeo room."); setStatus("error"); } }, 8000);
+    const timeout = window.setTimeout(() => { if (active.current) { setError("Open Ping inside an Owlbear Rodeo room."); setStatus("error"); } }, 8000);
     if (!OBR.isAvailable) {
-      window.clearTimeout(timeout); setError("Open OBR Ping inside an Owlbear Rodeo room."); setStatus("error");
+      window.clearTimeout(timeout); setError("Open Ping inside an Owlbear Rodeo room."); setStatus("error");
       return () => { active.current = false; };
     }
     OBR.onReady(async () => {
@@ -43,7 +42,6 @@ export function usePingRoom() {
         cleanups.push(OBR.room.onMetadataChange(setMetadata));
         cleanups.push(OBR.party.onChange(() => void refresh()));
         cleanups.push(OBR.player.onChange(() => void refresh()));
-        cleanups.push(OBR.scene.onReadyChange(setSceneReady));
         await refresh();
       } catch (cause) { if (active.current) { setError(cause instanceof Error ? cause.message : "Unable to connect to Owlbear Rodeo."); setStatus("error"); } }
     });
@@ -51,5 +49,5 @@ export function usePingRoom() {
   }, [refresh, setParty]);
 
   const room = useMemo(() => readRoomState(metadata), [metadata]);
-  return { status, role, currentPlayer, players, metadata, sceneReady, error, refresh, ...room };
+  return { status, role, currentPlayer, players, metadata, error, refresh, ...room };
 }

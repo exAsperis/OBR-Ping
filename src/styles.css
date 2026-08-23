@@ -19,8 +19,8 @@ h3 { font-size: 1rem; margin-bottom: .35rem; line-height: 1.35; }
 .brand-lockup { display: flex; align-items: center; gap: .7rem; }
 .brand-lockup img { width: 42px; height: 42px; border-radius: 12px; box-shadow: var(--shadow); }
 .eyebrow { display: block; color: var(--muted); font-weight: 800; font-size: .67rem; letter-spacing: .11em; text-transform: uppercase; margin-bottom: .2rem; }
-.room-state { display: flex; align-items: center; gap: .35rem; color: var(--muted); font-size: .75rem; white-space: nowrap; }
-.presence { width: 7px; height: 7px; border-radius: 50%; background: #9a9aa0; }.presence.ready { background: #48a779; }
+.help-link { display: inline-grid; place-items: center; width: 2rem; height: 2rem; border: 2px solid currentColor; border-radius: 50%; color: var(--muted); font-size: 1rem; font-weight: 900; line-height: 1; text-decoration: none; }
+.help-link:hover { color: var(--text); }.help-link:focus-visible { outline: 3px solid color-mix(in srgb, var(--primary) 45%, transparent); outline-offset: 2px; }
 .tab-bar { position: sticky; top: 0; z-index: 2; display: grid; grid-template-columns: repeat(4, 1fr); padding: .35rem .7rem; background: color-mix(in srgb, var(--bg) 90%, transparent); backdrop-filter: blur(12px); border-bottom: 1px solid var(--border); }
 .tab-bar button { border: 0; background: transparent; padding: .75rem .2rem; color: var(--muted); font-size: .78rem; font-weight: 800; border-radius: 10px; }
 .tab-bar button.active { color: var(--text); background: color-mix(in srgb, var(--paper) 84%, transparent); }
@@ -34,9 +34,8 @@ h3 { font-size: 1rem; margin-bottom: .35rem; line-height: 1.35; }
 .segmented.small { grid-template-columns: repeat(2, 1fr); }
 .segmented button { border: 0; background: transparent; border-radius: 9px; padding: .55rem .25rem; color: var(--muted); font-size: .73rem; font-weight: 800; }
 .segmented button.active { background: var(--paper); color: var(--text); box-shadow: 0 2px 8px rgb(0 0 0 / 8%); }.segmented button:disabled { opacity: .38; }
-.type-picker { width: 100%; gap: .4rem; padding: 0; background: transparent; }
-.type-picker button { display: flex; min-width: 0; align-items: center; justify-content: center; gap: .3rem; min-height: 3rem; padding: .55rem .25rem; border: 1px solid var(--border); background: color-mix(in srgb, var(--paper) 82%, transparent); }
-.type-picker button.active { border-color: color-mix(in srgb, currentColor 38%, transparent); }
+.type-picker { width: 100%; }
+.type-picker button { display: flex; min-width: 0; align-items: center; justify-content: center; gap: .3rem; min-height: 3rem; }
 .type-picker .type-message { color: #d96045; }.type-picker .type-vote { color: #3c83b9; }.type-picker .type-quiz { color: #7754c1; }.type-picker .type-nomination { color: #32865f; }
 .ping-glyph { width: 1.15rem; height: 1.15rem; flex: 0 0 auto; }
 .reply-compose-label { display: flex; align-items: center; gap: .45rem; padding: .1rem .15rem; color: var(--muted); font-size: .78rem; font-weight: 850; }
@@ -92,4 +91,4 @@ fieldset { border: 0; margin: 0; padding: 0; } legend { margin-bottom: .4rem; }
 .facts { display: grid; gap: .45rem; margin: 0; }.facts div { display: flex; justify-content: space-between; gap: 1rem; }.facts dt { color: var(--muted); font-size: .74rem; }.facts dd { margin: 0; font-size: .74rem; font-weight: 850; }
 .meter { height: .65rem; overflow: hidden; border-radius: 999px; background: color-mix(in srgb, var(--text) 9%, transparent); }.meter span { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #4ba678, var(--primary)); }
 .centered { min-height: 100vh; display: grid; place-items: center; padding: 1rem; }.status-panel { max-width: 340px; text-align: center; }.status-panel img { width: 72px; height: 72px; border-radius: 20px; margin-bottom: 1rem; }
-@media (max-width: 350px) { .room-state { display: none; }.content { padding: .55rem; }.panel, .ping-card { border-radius: 13px; padding: .8rem; }.segmented button { font-size: .66rem; }.button-row { flex-wrap: wrap; } }
+@media (max-width: 350px) { .content { padding: .55rem; }.panel, .ping-card { border-radius: 13px; padding: .8rem; }.segmented button { font-size: .66rem; }.button-row { flex-wrap: wrap; } }

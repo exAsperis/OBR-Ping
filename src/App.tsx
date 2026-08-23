@@ -27,7 +27,7 @@ export default function App() {
   const renderCards = (items: PingRecord[], empty: string) => items.length ? <div className="stack">{items.map((ping) => <PingCard key={ping.id} ping={ping} responses={room.responses} currentPlayer={room.currentPlayer} role={room.role} settings={room.settings} metadata={room.metadata} now={now} onReply={openReply} onChanged={changed} />)}</div> : <section className="empty-state"><img src="/icon.svg" alt="" /><h2>All clear</h2><p>{empty}</p></section>;
 
   return <main className="app-shell">
-    <header className="app-header"><div className="brand-lockup"><img src="/icon.svg" alt="" /><div><span className="eyebrow">Owlbear Rodeo</span><h1>Ping</h1></div></div><div className="room-state"><span className={`presence ${room.sceneReady ? "ready" : ""}`} />{room.sceneReady ? "Scene open" : "No scene needed"}</div></header>
+    <header className="app-header"><div className="brand-lockup"><img src="/icon.svg" alt="" /><h1>Ping</h1></div><a className="help-link" href="https://obr-ping.ex-asperis.com/" target="_blank" rel="noreferrer" aria-label="Open Ping help">?</a></header>
     {metadataBytes(room.metadata) > METADATA_LIMIT_BYTES * .9 && <div className="notice warning" role="status">Room metadata is nearly full. Ask the GM to review storage.</div>}
     <nav className="tab-bar" aria-label="Ping sections">
       <button className={tab === "waiting" ? "active" : ""} onClick={() => setTab("waiting")}><span>Waiting</span>{waiting.length > 0 && <b>{waiting.length}</b>}</button>

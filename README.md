@@ -1,8 +1,8 @@
-# OBR Ping
+# Ping for Owlbear Rodeo
 
 Votes, quizzes, nominations, and messages for [Owlbear Rodeo](https://www.owlbear.rodeo/).
 
-OBR Ping sends short, focused interactions to everyone in a room, a selected group, or one player. Every Ping has one purpose and a clear end; it is not a chat client.
+Ping for Owlbear Rodeo sends short, focused interactions to everyone in a room, a selected group, or one player. Every Ping has one purpose and a clear end; it is not a chat client.
 
 ## Features
 
@@ -51,11 +51,11 @@ pnpm run build
 
 ## Storage, privacy, and limits
 
-OBR Ping has no backend. Its interactions and responses are stored in Owlbear room metadata under `com.ex-asperis.obr-ping`, and device notification preferences remain in extension-origin browser storage.
+Ping has no backend. Its interactions and responses are stored in Owlbear room metadata under `com.ex-asperis.obr-ping`, and device notification preferences remain in extension-origin browser storage.
 
 Owlbear room metadata is limited to 16 KB across all extensions. Ping checks the projected size before writes and gives the GM a meter showing total room usage, Ping usage, and estimated remaining capacity. Data is never pruned automatically; the GM and interaction senders have explicit cleanup controls.
 
-Vote choices are secret in the OBR Ping interface: results never reveal voter-to-ballot mappings. Owlbear metadata is technically inspectable by room participants, so this is not cryptographic secrecy. Reliability is limited to Owlbear room metadata and stable Owlbear player IDs; there is no cross-room archive or trusted external clock.
+Vote choices are secret in the Ping interface: results never reveal voter-to-ballot mappings. Owlbear metadata is technically inspectable by room participants, so this is not cryptographic secrecy. Reliability is limited to Owlbear room metadata and stable Owlbear player IDs; there is no cross-room archive or trusted external clock.
 
 ## Production
 
