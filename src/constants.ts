@@ -1,0 +1,8 @@
+export const EXTENSION_ID = "com.ex-asperis.obr-ping";
+export const EXTENSION_NAME = "OBR Ping";
+export const METADATA_LIMIT_BYTES = 16 * 1024;
+export const SETTINGS_KEY = `${EXTENSION_ID}/settings`;
+export const PING_PREFIX = `${EXTENSION_ID}/ping/`;
+export const RESPONSE_PREFIX = `${EXTENSION_ID}/response/`;
+export const PREFERENCE_KEY = `${EXTENSION_ID}/notification-preference`;
+export const SEEN_KEY = `${EXTENSION_ID}/seen-pings`;

@@ -1,0 +1,17 @@
+import { access, readFile } from "node:fs/promises";
+const readJson = async (path) => JSON.parse(await readFile(path, "utf8"));
+const pkg = await readJson("package.json");
+const manifest = await readJson("public/manifest.json");
+const local = await readJson("public/manifest-local.json");
+const path = `public/manifest-v${pkg.version}.json`;
+await access(path);
+const versioned = await readJson(path);
+const source = await readFile("src/version.ts", "utf8");
+const sourceVersion = source.match(/RELEASE_VERSION\s*=\s*["']([^"']+)/)?.[1];
+const resources = [manifest.icon, manifest.background_url, manifest.action?.icon, manifest.action?.popover];
+const failures = [];
+for (const [label, value] of [["manifest", manifest.version], ["local manifest", local.version], [path, versioned.version], ["source", sourceVersion]]) if (value !== pkg.version) failures.push(`${label}=${String(value)}`);
+for (const url of resources) if (!url || new URL(url).searchParams.get("v") !== pkg.version) failures.push(`resource query=${String(url)}`);
+if (JSON.stringify(manifest) !== JSON.stringify(versioned)) failures.push("stable and versioned manifests differ");
+if (failures.length) throw new Error(`Release version drift (expected ${pkg.version}): ${failures.join(", ")}`);
+console.log(`Release versions synchronized at ${pkg.version}.`);

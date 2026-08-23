@@ -1,0 +1,17 @@
+{
+  "name": "OBR Ping",
+  "version": "0.1.0",
+  "manifest_version": 1,
+  "description": "Votes, quizzes, nominations, and messages for Owlbear Rodeo.",
+  "author": "ex Asperis",
+  "homepage_url": "https://obr-ping.ex-asperis.com/",
+  "icon": "https://obr-ping.ex-asperis.com/icon.svg?v=0.1.0",
+  "background_url": "https://obr-ping.ex-asperis.com/background.html?v=0.1.0",
+  "action": {
+    "title": "OBR Ping",
+    "icon": "https://obr-ping.ex-asperis.com/icon.svg?v=0.1.0",
+    "popover": "https://obr-ping.ex-asperis.com/extension.html?v=0.1.0",
+    "width": 440,
+    "height": 680
+  }
+}

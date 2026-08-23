@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-labelledby="title">
+  <title id="title">OBR Ping</title>
+  <defs><linearGradient id="g" x1="20" y1="18" x2="108" y2="112" gradientUnits="userSpaceOnUse"><stop stop-color="#ffbd59"/><stop offset="1" stop-color="#ff5f5f"/></linearGradient></defs>
+  <path fill="url(#g)" fill-rule="evenodd" clip-rule="evenodd" d="M28 31h72a10 10 0 0 1 10 10v44a10 10 0 0 1-10 10H63l-24 18 5-18H28a10 10 0 0 1-10-10V41a10 10 0 0 1 10-10ZM50 63a7 7 0 1 1-14 0 7 7 0 1 1 14 0Zm21 0a7 7 0 1 1-14 0 7 7 0 1 1 14 0Zm21 0a7 7 0 1 1-14 0 7 7 0 1 1 14 0Z"/>
+</svg>

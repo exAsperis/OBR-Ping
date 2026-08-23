@@ -1,0 +1,133 @@
+import { useEffect, useMemo, useState } from "react";
+import type { Metadata } from "@owlbear-rodeo/sdk";
+import { SCHEMA_VERSION, canCreate, canManage, formatDuration, instantRunoff, isExpired, isRecipient, optionLabel, quizStandings, responseFor, responsesFor, voteTotals, type Participant, type PingRecord, type PingResponse, type RoomSettings } from "../domain";
+import { removePing, savePing, saveResponse } from "../storage";
+import type { MessagePrefill } from "./ComposePing";
+import { PingGlyph } from "./PingGlyph";
+import { Toggle } from "./Toggle";
+
+interface Props {
+  ping: PingRecord;
+  responses: PingResponse[];
+  currentPlayer: Participant;
+  role: "GM" | "PLAYER";
+  settings: RoomSettings;
+  metadata: Metadata;
+  now: number;
+  onReply: (prefill: MessagePrefill) => void;
+  onChanged: () => void;
+}
+
+const typeLabel = { quiz: "Quiz", vote: "Vote", nomination: "Nomination", message: "Message" } as const;
+
+export function PingCard({ ping, responses, currentPlayer, role, settings, metadata, now, onReply, onChanged }: Props) {
+  const existing = responseFor(responses, ping.id, currentPlayer.id);
+  const relevant = responsesFor(responses, ping.id);
+  const manager = canManage(ping, currentPlayer.id, role);
+  const recipient = isRecipient(ping, currentPlayer.id);
+  const expired = isExpired(ping, now);
+  const active = ping.status === "active" && !expired;
+  const [selected, setSelected] = useState<string[]>(ping.type === "vote" && ping.content.mode === "ranked" ? ping.content.options.map((option) => option.id) : []);
+  const [nomination, setNomination] = useState("");
+  const initialCurated = useMemo(() => ping.type === "nomination" ? ping.content.curated ?? relevant.filter((item) => item.type === "nomination").map((item) => item.value) : [], [ping, relevant]);
+  const [curated, setCurated] = useState(initialCurated);
+  const nominationSeed = ping.type === "nomination" ? (ping.content.curated ?? relevant.filter((item) => item.type === "nomination").map((item) => item.value)).join("\u0000") : "";
+  useEffect(() => { if (ping.type === "nomination" && ping.status !== "active") setCurated(nominationSeed ? nominationSeed.split("\u0000") : []); }, [nominationSeed, ping.status, ping.type]);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const respond = async () => {
+    setError(null);
+    let response: PingResponse;
+    if (ping.type === "quiz") {
+      if (!selected.length || (ping.content.mode === "single" && selected.length !== 1)) { setError("Choose an answer."); return; }
+      response = { schemaVersion: SCHEMA_VERSION, pingId: ping.id, playerId: currentPlayer.id, playerName: currentPlayer.name, respondedAt: Date.now(), type: "quiz", optionIds: selected };
+    } else if (ping.type === "vote") {
+      if (ping.content.mode === "single" && selected.length !== 1) { setError("Choose one option."); return; }
+      if (ping.content.mode === "ranked" && (selected.length !== ping.content.options.length || new Set(selected).size !== selected.length)) { setError("Rank every option once."); return; }
+      response = { schemaVersion: SCHEMA_VERSION, pingId: ping.id, playerId: currentPlayer.id, playerName: currentPlayer.name, respondedAt: Date.now(), type: "vote", optionIds: selected };
+    } else if (ping.type === "nomination") {
+      const value = nomination.trim();
+      if (!value || /[\r\n]/.test(value)) { setError("Enter one single-line nomination."); return; }
+      response = { schemaVersion: SCHEMA_VERSION, pingId: ping.id, playerId: currentPlayer.id, playerName: currentPlayer.name, respondedAt: Date.now(), type: "nomination", value };
+    } else response = { schemaVersion: SCHEMA_VERSION, pingId: ping.id, playerId: currentPlayer.id, playerName: currentPlayer.name, respondedAt: Date.now(), type: "message", read: true };
+    setBusy(true); try { await saveResponse(response, metadata); onChanged(); } catch (cause) { setError(cause instanceof Error ? cause.message : "Unable to save your response."); } finally { setBusy(false); }
+  };
+
+  const updateStatus = async (status: "completed" | "cancelled") => {
+    setBusy(true); setError(null);
+    try { await savePing({ ...ping, status, ...(status === "completed" ? { completedAt: Date.now() } : { cancelledAt: Date.now() }) }, metadata); onChanged(); }
+    catch (cause) { setError(cause instanceof Error ? cause.message : "Unable to update this Ping."); } finally { setBusy(false); }
+  };
+
+  const deleteInteraction = async () => {
+    if (!window.confirm("Delete this Ping and all of its responses? This cannot be undone.")) return;
+    setBusy(true); try { await removePing(ping.id, metadata); onChanged(); } catch (cause) { setError(cause instanceof Error ? cause.message : "Unable to delete this Ping."); } finally { setBusy(false); }
+  };
+
+  const saveCuration = async () => {
+    if (ping.type !== "nomination") return;
+    const cleaned = curated.map((item) => item.trim()).filter(Boolean).slice(0, 8);
+    setBusy(true); try { await savePing({ ...ping, content: { ...ping.content, curated: cleaned } }, metadata); setCurated(cleaned); onChanged(); } catch (cause) { setError(cause instanceof Error ? cause.message : "Unable to save nominations."); } finally { setBusy(false); }
+  };
+
+  const createVote = async () => {
+    if (ping.type !== "nomination") return;
+    const cleaned = curated.map((item) => item.trim()).filter(Boolean).slice(0, 8);
+    if (cleaned.length < 2) { setError("Keep at least two nominations to create a Vote."); return; }
+    const vote: PingRecord = { schemaVersion: SCHEMA_VERSION, id: crypto.randomUUID(), type: "vote", sender: currentPlayer, recipients: ping.recipients, createdAt: Date.now(), status: "active", content: { question: ping.content.prompt, mode: "single", options: cleaned.map((label) => ({ id: crypto.randomUUID(), label })) } };
+    setBusy(true); try { await savePing(vote, metadata); onChanged(); } catch (cause) { setError(cause instanceof Error ? cause.message : "Unable to create the Vote."); } finally { setBusy(false); }
+  };
+
+  const startReply = async (replyAll: boolean) => {
+    if (ping.type !== "message") return;
+    const prefill: MessagePrefill = { source: ping, replyAll, recipients: (replyAll ? [ping.sender, ...ping.recipients] : [ping.sender]).filter((player, index, all) => player.id !== currentPlayer.id && all.findIndex((candidate) => candidate.id === player.id) === index) };
+    if (existing) { onReply(prefill); return; }
+    setBusy(true); setError(null);
+    const readResponse: PingResponse = { schemaVersion: SCHEMA_VERSION, pingId: ping.id, playerId: currentPlayer.id, playerName: currentPlayer.name, respondedAt: Date.now(), type: "message", read: true };
+    try { await saveResponse(readResponse, metadata); onChanged(); onReply(prefill); }
+    catch (cause) { setError(cause instanceof Error ? cause.message : "Unable to open the reply composer."); }
+    finally { setBusy(false); }
+  };
+
+  const toggleSelection = (id: string) => setSelected((previous) => ping.type === "quiz" && ping.content.mode === "multiple" ? previous.includes(id) ? previous.filter((item) => item !== id) : [...previous, id] : [id]);
+  const moveRank = (index: number, direction: -1 | 1) => setSelected((previous) => { const next = [...previous]; const target = index + direction; if (target < 0 || target >= next.length) return previous; [next[index], next[target]] = [next[target], next[index]]; return next; });
+
+  const renderResponse = () => {
+    if (!recipient) return null;
+    if (existing) return <div className="notice success" role="status">{ping.type === "message" ? "Read" : "Response received"}</div>;
+    if (!active) return null;
+    if (ping.type === "message") return <button className="primary-button" disabled={busy} onClick={() => void respond()}>Mark as read</button>;
+    if (ping.type === "nomination") return <div className="stack compact"><label>Your nomination<input maxLength={160} value={nomination} onChange={(event) => setNomination(event.target.value.replace(/[\r\n]/g, ""))} /></label><span className="counter">{nomination.length}/160</span><button className="primary-button" disabled={busy} onClick={() => void respond()}>Submit nomination</button></div>;
+    if (ping.type === "vote" && ping.content.mode === "ranked") return <div className="stack compact"><p className="muted">Rank every option from most to least preferred.</p><ol className="rank-list">{selected.map((id, index) => <li key={id}><span>{optionLabel(ping, id)}</span><span><button type="button" className="icon-button" disabled={index === 0} aria-label="Move up" onClick={() => moveRank(index, -1)}>↑</button><button type="button" className="icon-button" disabled={index === selected.length - 1} aria-label="Move down" onClick={() => moveRank(index, 1)}>↓</button></span></li>)}</ol><button className="primary-button" disabled={busy} onClick={() => void respond()}>Submit ranking</button></div>;
+    const options = ping.content.options;
+    const multiple = ping.type === "quiz" && ping.content.mode === "multiple";
+    return <div className="stack compact"><div className="choice-list">{options.map((option) => multiple ? <Toggle key={option.id} checked={selected.includes(option.id)} onChange={() => toggleSelection(option.id)} label={option.label} /> : <label className="choice-row" key={option.id}><input type="radio" name={`answer-${ping.id}`} checked={selected.includes(option.id)} onChange={() => toggleSelection(option.id)} /><span>{option.label}</span></label>)}</div><button className="primary-button" disabled={busy} onClick={() => void respond()}>{ping.type === "quiz" ? "Answer" : "Vote"}</button></div>;
+  };
+
+  const renderResults = () => {
+    if (ping.status === "cancelled") return <div className="notice">This Ping was cancelled.</div>;
+    if (ping.status !== "completed" && !expired) return <p className="muted">{relevant.length} of {ping.recipients.length} responded</p>;
+    if (ping.type === "quiz") return <ol className="results-list">{quizStandings(ping, responses).map((standing, index) => <li key={standing.player.id}><span><strong>{index + 1}. {standing.player.name}</strong><small>{standing.answered ? standing.correct ? "Correct" : "Incorrect" : "No answer"}</small></span><span>{standing.elapsedMs !== undefined ? formatDuration(standing.elapsedMs) : "—"}</span></li>)}</ol>;
+    if (ping.type === "vote") {
+      if (ping.content.mode === "single") { const totals = voteTotals(ping, responses); return <ol className="results-list">{[...ping.content.options].sort((a, b) => totals[b.id] - totals[a.id]).map((option) => <li key={option.id}><span>{option.label}</span><strong>{totals[option.id]}</strong></li>)}</ol>; }
+      const rounds = instantRunoff(ping, responses); return <div className="stack compact">{rounds.map((round, index) => <div className="round" key={index}><strong>Round {index + 1}</strong>{ping.content.options.filter((option) => option.id in round.counts).map((option) => <div key={option.id}><span>{option.label}</span><span>{round.counts[option.id]}</span></div>)}<small>{round.winner ? `${optionLabel(ping, round.winner)} wins` : round.eliminated ? `${optionLabel(ping, round.eliminated)} eliminated` : ""}</small></div>)}</div>;
+    }
+    if (ping.type === "nomination") return manager ? <div className="stack compact"><p className="muted">Edit, combine, or remove responses before creating a separate Vote.</p>{curated.map((item, index) => <div className="curated-option-editor" key={index}><input maxLength={100} value={item} onChange={(event) => setCurated((previous) => previous.map((value, itemIndex) => itemIndex === index ? event.target.value : value))} /><button className="icon-button" aria-label="Remove nomination" onClick={() => setCurated((previous) => previous.filter((_, itemIndex) => itemIndex !== index))}>×</button></div>)}<div className="button-row"><button className="secondary-button" disabled={busy} onClick={() => void saveCuration()}>Save list</button><button className="primary-button" disabled={busy || !canCreate(role, "vote", settings)} onClick={() => void createVote()}>Create Vote</button></div></div> : <p className="muted">The sender is reviewing the nominations.</p>;
+    const reads = relevant.filter((response) => response.type === "message").length;
+    return <p className="muted">Read by {reads} of {ping.recipients.length} recipients.</p>;
+  };
+
+  const replyAllowed = ping.type === "message" && recipient && ping.content.allowReply && canCreate(role, "message", settings);
+  return <article className={`ping-card ${ping.type}`}>
+    <header><div className="ping-heading"><span className="glyph-frame"><PingGlyph type={ping.type} /></span><div><span className="type-chip">{typeLabel[ping.type]}</span><h3>{ping.type === "message" ? ping.content.message : ping.type === "nomination" ? ping.content.prompt : ping.content.question}</h3></div></div><span className={`status ${ping.status}`}>{expired && ping.status === "active" ? "expired" : ping.status}</span></header>
+    <p className="byline">From {ping.sender.name} · {new Date(ping.createdAt).toLocaleString()}</p>
+    {ping.type === "message" && ping.content.replyTo && <p className="reply-reference">In reply to: “{ping.content.replyTo.excerpt}”</p>}
+    {ping.expiresAt && ping.status === "active" && <div className="timer" aria-live="polite">{expired ? "Time ended" : `${formatDuration(ping.expiresAt - now)} remaining`}</div>}
+    {renderResponse()}
+    {error && <div className="notice error" role="alert">{error}</div>}
+    <div className="results">{renderResults()}</div>
+    {replyAllowed && ping.type === "message" && <div className="button-row"><button className="secondary-button" disabled={busy} onClick={() => void startReply(false)}>Reply</button>{ping.content.allowReplyAll && <button className="secondary-button" disabled={busy} onClick={() => void startReply(true)}>Reply all</button>}</div>}
+    {manager && <footer className="card-actions">{active && (ping.type === "vote" || ping.type === "nomination") && <button className="text-button" disabled={busy} onClick={() => void updateStatus("completed")}>End now</button>}{active && <button className="text-button danger" disabled={busy} onClick={() => void updateStatus("cancelled")}>Cancel</button>}{!active && <button className="text-button danger" disabled={busy} onClick={() => void deleteInteraction()}>Delete</button>}</footer>}
+  </article>;
+}
