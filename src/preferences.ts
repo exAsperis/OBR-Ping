@@ -1,4 +1,4 @@
-import { PREFERENCE_KEY, SEEN_KEY } from "./constants";
+import { PREFERENCE_KEY, SEEN_KEY, SOUND_KEY } from "./constants";
 
 export type NotificationPreference = "badge-toast" | "badge" | "auto-open";
 
@@ -11,6 +11,15 @@ export function getNotificationPreference(): NotificationPreference {
 
 export function setNotificationPreference(value: NotificationPreference) {
   try { localStorage.setItem(PREFERENCE_KEY, value); } catch { /* Preference remains at its default. */ }
+}
+
+export function getSoundEnabled(): boolean {
+  try { return localStorage.getItem(SOUND_KEY) !== "false"; }
+  catch { return true; }
+}
+
+export function setSoundEnabled(value: boolean) {
+  try { localStorage.setItem(SOUND_KEY, String(value)); } catch { /* Sound remains at its default. */ }
 }
 
 export function getSeenPings(): Set<string> {

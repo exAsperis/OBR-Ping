@@ -7,6 +7,12 @@
   "homepage_url": "http://localhost:5173/",
   "icon": "http://localhost:5173/icon.svg",
   "background_url": "http://localhost:5173/background.html",
+  "permissions": [
+    {
+      "name": "autoplay",
+      "reason": "Play a short sound when a Ping is delivered."
+    }
+  ],
   "action": {
     "title": "Ping (Local)",
     "icon": "http://localhost:5173/icon.svg",

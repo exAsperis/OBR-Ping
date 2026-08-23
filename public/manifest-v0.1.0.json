@@ -7,6 +7,12 @@
   "homepage_url": "https://obr-ping.ex-asperis.com/",
   "icon": "https://obr-ping.ex-asperis.com/icon.svg?v=0.1.0",
   "background_url": "https://obr-ping.ex-asperis.com/background.html?v=0.1.0",
+  "permissions": [
+    {
+      "name": "autoplay",
+      "reason": "Play a short sound when a Ping is delivered."
+    }
+  ],
   "action": {
     "title": "Ping",
     "icon": "https://obr-ping.ex-asperis.com/icon.svg?v=0.1.0",

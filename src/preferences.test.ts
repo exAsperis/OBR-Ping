@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { getNotificationPreference, getSeenPings, setNotificationPreference, setSeenPings } from "./preferences";
+import { getNotificationPreference, getSeenPings, getSoundEnabled, setNotificationPreference, setSeenPings, setSoundEnabled } from "./preferences";
 
 describe("local preferences", () => {
   beforeEach(() => localStorage.clear());
@@ -11,5 +11,10 @@ describe("local preferences", () => {
   it("persists a bounded seen-Ping set", () => {
     setSeenPings(["a", "b"]);
     expect([...getSeenPings()]).toEqual(["a", "b"]);
+  });
+  it("enables delivery sounds by default and persists an override", () => {
+    expect(getSoundEnabled()).toBe(true);
+    setSoundEnabled(false);
+    expect(getSoundEnabled()).toBe(false);
   });
 });

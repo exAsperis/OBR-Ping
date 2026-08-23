@@ -1,7 +1,8 @@
 import OBR from "@owlbear-rodeo/sdk";
 import { readRoomState, waitingPings } from "./domain";
 import { completionUpdate } from "./lifecycle";
-import { getNotificationPreference, getSeenPings, setSeenPings } from "./preferences";
+import { getNotificationPreference, getSeenPings, getSoundEnabled, setSeenPings } from "./preferences";
+import { playPingSound } from "./sound";
 import { safeSetMetadata } from "./storage";
 
 let processing = false;
@@ -23,6 +24,7 @@ async function synchronize(providedMetadata?: Awaited<ReturnType<typeof OBR.room
     const incoming = waiting.filter((ping) => !seen.has(ping.id));
     const preference = getNotificationPreference();
     if (incoming.length) {
+      if (getSoundEnabled()) await playPingSound();
       if (preference === "auto-open") await OBR.action.open();
       else if (preference === "badge-toast") await OBR.notification.show(incoming.length === 1 ? `${incoming[0].sender.name} sent you a ${incoming[0].type}.` : `${incoming.length} new Pings are waiting.`, "INFO");
     }

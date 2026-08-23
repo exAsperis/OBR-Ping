@@ -5,4 +5,5 @@ export const SETTINGS_KEY = `${EXTENSION_ID}/settings`;
 export const PING_PREFIX = `${EXTENSION_ID}/ping/`;
 export const RESPONSE_PREFIX = `${EXTENSION_ID}/response/`;
 export const PREFERENCE_KEY = `${EXTENSION_ID}/notification-preference`;
+export const SOUND_KEY = `${EXTENSION_ID}/notification-sound`;
 export const SEEN_KEY = `${EXTENSION_ID}/seen-pings`;
