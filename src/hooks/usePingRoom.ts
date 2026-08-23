@@ -15,14 +15,14 @@ export function usePingRoom() {
   const active = useRef(false);
 
   const setParty = useCallback((party: Player[], self: Participant) => {
-    const all = [self, ...party.map((player) => ({ id: player.id, name: player.name || "Unnamed player" }))];
+    const all = [self, ...party.map((player) => ({ id: player.id, name: player.name || "Unnamed player", color: player.color }))];
     setPlayers(all.filter((player, index) => all.findIndex((candidate) => candidate.id === player.id) === index));
   }, []);
 
   const refresh = useCallback(async () => {
-    const [nextRole, name, party, roomMetadata] = await Promise.all([OBR.player.getRole(), OBR.player.getName(), OBR.party.getPlayers(), OBR.room.getMetadata()]);
+    const [nextRole, name, color, party, roomMetadata] = await Promise.all([OBR.player.getRole(), OBR.player.getName(), OBR.player.getColor(), OBR.party.getPlayers(), OBR.room.getMetadata()]);
     if (!active.current) return;
-    const self = { id: OBR.player.id, name: name || "Unnamed player" };
+    const self = { id: OBR.player.id, name: name || "Unnamed player", color };
     setRole(nextRole); setCurrentPlayer(self); setParty(party, self); setMetadata(roomMetadata); setError(null); setStatus("ready");
   }, [setParty]);
 

@@ -9,6 +9,7 @@ export type VoteMode = "single" | "ranked";
 export interface Participant {
   id: string;
   name: string;
+  color?: string;
 }
 
 export interface Option {
@@ -34,6 +35,7 @@ interface BasePing {
   type: PingType;
   sender: Participant;
   recipients: Participant[];
+  includeFutureRecipients?: boolean;
   createdAt: number;
   expiresAt?: number;
   status: PingStatus;
@@ -103,7 +105,7 @@ export interface IrvRound {
 const isObject = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
 const isString = (value: unknown): value is string => typeof value === "string";
 const isFiniteNumber = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value);
-const isParticipant = (value: unknown): value is Participant => isObject(value) && isString(value.id) && value.id.length > 0 && isString(value.name);
+const isParticipant = (value: unknown): value is Participant => isObject(value) && isString(value.id) && value.id.length > 0 && isString(value.name) && (value.color === undefined || isString(value.color));
 const isOption = (value: unknown): value is Option => isObject(value) && isString(value.id) && isString(value.label) && value.label.length > 0 && value.label.length <= 100;
 const isStringArray = (value: unknown): value is string[] => Array.isArray(value) && value.every(isString);
 const validOptions = (value: unknown) => Array.isArray(value) && value.length >= 2 && value.length <= 8 && value.every(isOption) && new Set(value.map((item) => item.id)).size === value.length;
@@ -116,7 +118,7 @@ export function parseSettings(value: unknown): RoomSettings {
 }
 
 export function parsePing(value: unknown): PingRecord | null {
-  if (!isObject(value) || value.schemaVersion !== SCHEMA_VERSION || !isString(value.id) || !["quiz", "vote", "nomination", "message"].includes(String(value.type)) || !isParticipant(value.sender) || !Array.isArray(value.recipients) || value.recipients.length === 0 || !value.recipients.every(isParticipant) || !isFiniteNumber(value.createdAt) || !["active", "completed", "cancelled"].includes(String(value.status)) || !isObject(value.content)) return null;
+  if (!isObject(value) || value.schemaVersion !== SCHEMA_VERSION || !isString(value.id) || !["quiz", "vote", "nomination", "message"].includes(String(value.type)) || !isParticipant(value.sender) || !Array.isArray(value.recipients) || !value.recipients.every(isParticipant) || (value.recipients.length === 0 && value.includeFutureRecipients !== true) || (value.includeFutureRecipients !== undefined && typeof value.includeFutureRecipients !== "boolean") || !isFiniteNumber(value.createdAt) || !["active", "completed", "cancelled"].includes(String(value.status)) || !isObject(value.content)) return null;
   if (value.expiresAt !== undefined && (!isFiniteNumber(value.expiresAt) || value.expiresAt <= value.createdAt)) return null;
   const content = value.content;
   switch (value.type) {
@@ -166,7 +168,7 @@ export const pingKey = (pingId: string) => `${PING_PREFIX}${pingId}`;
 export const responseKey = (pingId: string, playerId: string) => `${RESPONSE_PREFIX}${pingId}/${encodeURIComponent(playerId)}`;
 export const responsesFor = (responses: PingResponse[], pingId: string) => responses.filter((response) => response.pingId === pingId);
 export const responseFor = (responses: PingResponse[], pingId: string, playerId: string) => responses.find((response) => response.pingId === pingId && response.playerId === playerId);
-export const isRecipient = (ping: PingRecord, playerId: string) => ping.recipients.some((recipient) => recipient.id === playerId);
+export const isRecipient = (ping: PingRecord, playerId: string, now = Date.now()) => ping.recipients.some((recipient) => recipient.id === playerId) || Boolean(ping.includeFutureRecipients && ping.sender.id !== playerId && ping.status === "active" && (ping.expiresAt === undefined || now < ping.expiresAt));
 export const canCreate = (role: "GM" | "PLAYER", type: PingType, settings: RoomSettings) => role === "GM" || (settings.allowPlayers && settings.allowedTypes[type]);
 export const canManage = (ping: PingRecord, playerId: string, role: "GM" | "PLAYER") => role === "GM" || ping.sender.id === playerId;
 export const isExpired = (ping: PingRecord, now = Date.now()) => ping.status === "active" && ping.expiresAt !== undefined && now >= ping.expiresAt;
@@ -174,17 +176,20 @@ export const isExpired = (ping: PingRecord, now = Date.now()) => ping.status ===
 export function isComplete(ping: PingRecord, responses: PingResponse[], now = Date.now()) {
   if (ping.status !== "active") return true;
   if (isExpired(ping, now)) return true;
+  if (ping.includeFutureRecipients) return false;
   const answered = new Set(responsesFor(responses, ping.id).map((response) => response.playerId));
   return ping.recipients.every((recipient) => answered.has(recipient.id));
 }
 
 export function waitingPings(pings: PingRecord[], responses: PingResponse[], playerId: string, now = Date.now()) {
-  return pings.filter((ping) => ping.status === "active" && !isExpired(ping, now) && isRecipient(ping, playerId) && !responseFor(responses, ping.id, playerId));
+  return pings.filter((ping) => ping.status === "active" && !isExpired(ping, now) && isRecipient(ping, playerId, now) && !responseFor(responses, ping.id, playerId));
 }
 
 const sameSet = (left: string[], right: string[]) => left.length === right.length && left.every((value) => right.includes(value));
 export function quizStandings(ping: QuizPing, responses: PingResponse[]): QuizStanding[] {
-  return ping.recipients.map((player) => {
+  const players = [...ping.recipients];
+  if (ping.includeFutureRecipients) for (const response of responsesFor(responses, ping.id)) if (!players.some((player) => player.id === response.playerId)) players.push({ id: response.playerId, name: response.playerName });
+  return players.map((player) => {
     const response = responsesFor(responses, ping.id).find((item): item is QuizResponse => item.playerId === player.id && item.type === "quiz");
     return { player, answered: Boolean(response), correct: Boolean(response && sameSet([...response.optionIds].sort(), [...ping.content.correctOptionIds].sort())), elapsedMs: response ? Math.max(0, response.respondedAt - ping.createdAt) : undefined };
   }).sort((a, b) => Number(b.correct) - Number(a.correct) || Number(b.answered) - Number(a.answered) || (a.elapsedMs ?? Infinity) - (b.elapsedMs ?? Infinity) || a.player.name.localeCompare(b.player.name));

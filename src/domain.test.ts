@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_SETTINGS, SCHEMA_VERSION, canCreate, instantRunoff, metadataBytes, parsePing, parseSettings, pingKey, projectedMetadata, quizStandings, readRoomState, replyRecipients, responseKey, waitingPings, type MessagePing, type PingResponse, type QuizPing, type VotePing } from "./domain";
+import { DEFAULT_SETTINGS, SCHEMA_VERSION, canCreate, instantRunoff, isComplete, isRecipient, metadataBytes, parsePing, parseSettings, pingKey, projectedMetadata, quizStandings, readRoomState, replyRecipients, responseKey, waitingPings, type MessagePing, type PingResponse, type QuizPing, type VotePing } from "./domain";
 import { METADATA_LIMIT_BYTES, SETTINGS_KEY } from "./constants";
 
 const gm = { id: "gm", name: "Game Master" };
@@ -37,6 +37,15 @@ describe("permissions and waiting state", () => {
     expect(waitingPings([quiz], [], ada.id, 2000)).toEqual([quiz]);
     expect(waitingPings([quiz], [response], ada.id, 2000)).toEqual([]);
     expect(waitingPings([quiz], [], ada.id, 70_000)).toEqual([]);
+  });
+
+  it("delivers active Pings to future joiners without completing early", () => {
+    const futureQuiz: QuizPing = { ...quiz, recipients: [], includeFutureRecipients: true };
+    expect(parsePing(futureQuiz)).toEqual(futureQuiz);
+    expect(isRecipient(futureQuiz, "new-player", 2_000)).toBe(true);
+    expect(waitingPings([futureQuiz], [], "new-player", 2_000)).toEqual([futureQuiz]);
+    expect(isComplete(futureQuiz, [], 2_000)).toBe(false);
+    expect(isRecipient(futureQuiz, "new-player", 70_000)).toBe(false);
   });
 });
 

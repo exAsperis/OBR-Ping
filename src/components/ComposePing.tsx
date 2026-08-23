@@ -25,6 +25,7 @@ interface DraftOption { id: string; value: string }
 const makeOption = (): DraftOption => ({ id: crypto.randomUUID(), value: "" });
 const typeOrder: PingType[] = ["message", "vote", "quiz", "nomination"];
 const labels: Record<PingType, string> = { quiz: "Quiz", vote: "Vote", nomination: "Nomination", message: "Message" };
+const FUTURE_RECIPIENT_ID = "__future_recipients__";
 
 const localDateTime = (time: number) => {
   const date = new Date(time - new Date().getTimezoneOffset() * 60_000);
@@ -80,13 +81,14 @@ export function ComposePing({ role, currentPlayer, players, settings, metadata, 
     event.preventDefault(); setError(null);
     if (!canCreate(role, type, settings)) { setError(`You do not have permission to create a ${labels[type]}.`); return; }
     const selected = available.filter((player) => recipients.has(player.id));
-    if (!selected.length) { setError("Choose at least one recipient."); return; }
+    const includeFutureRecipients = recipients.has(FUTURE_RECIPIENT_ID);
+    if (!selected.length && !includeFutureRecipients) { setError("Choose at least one recipient."); return; }
     const text = prompt.trim();
     if (!text) { setError(type === "message" ? "Enter a message." : "Enter a question or prompt."); return; }
     const deadline = expiresAt ? new Date(expiresAt).getTime() : undefined;
     if (deadline !== undefined && (!Number.isFinite(deadline) || deadline <= Date.now())) { setError("The deadline must be in the future."); return; }
     if (type === "quiz" && deadline === undefined) { setError("A Quiz requires a deadline."); return; }
-    const base = { schemaVersion: SCHEMA_VERSION, id: crypto.randomUUID(), sender: currentPlayer, recipients: selected, createdAt: Date.now(), expiresAt: deadline, status: "active" as const };
+    const base = { schemaVersion: SCHEMA_VERSION, id: crypto.randomUUID(), sender: currentPlayer, recipients: selected, ...(includeFutureRecipients ? { includeFutureRecipients: true } : {}), createdAt: Date.now(), expiresAt: deadline, status: "active" as const };
     let ping: PingRecord;
     if (type === "message") {
       ping = { ...base, type, content: { message: text, allowReply, allowReplyAll, ...(prefill ? { replyTo: { pingId: prefill.source.id, excerpt: excerpt(prefill.source.content.message) } } : {}) } };
@@ -111,8 +113,8 @@ export function ComposePing({ role, currentPlayer, players, settings, metadata, 
     {prefill ? <div className="reply-compose-label"><PingGlyph type="message" />{prefill.replyAll ? "Reply all" : "Reply"} to {prefill.source.sender.name}</div> : <div className="segmented type-picker" aria-label="Ping type">{typeOrder.map((item) => <button key={item} type="button" className={`${type === item ? "active " : ""}type-${item}`} disabled={!canCreate(role, item, settings)} onClick={() => selectType(item)}><PingGlyph type={item} /><span>{labels[item]}</span></button>)}</div>}
 
     <section className="panel">
-      <div className="section-heading"><div><span className="eyebrow">Recipients</span><h3>{recipients.size || "No"} selected</h3></div><button type="button" className="text-button" onClick={() => setRecipients(new Set(available.map((player) => player.id)))}>Everyone</button></div>
-      {!available.length ? <p className="muted">No other players are connected.</p> : <div className="choice-list">{available.map((player) => <Toggle key={player.id} checked={recipients.has(player.id)} onChange={() => toggleRecipient(player.id)} label={<span className="player-label"><span className="player-dot" aria-hidden="true" />{player.name}</span>} />)}</div>}
+      <div className="section-heading"><div><span className="eyebrow">Recipients</span><h3>{recipients.size || "No"} selected</h3></div><button type="button" className="text-button" onClick={() => setRecipients(new Set([...available.map((player) => player.id), FUTURE_RECIPIENT_ID]))}>Everyone</button></div>
+      <div className="choice-list"><Toggle checked={recipients.has(FUTURE_RECIPIENT_ID)} onChange={() => toggleRecipient(FUTURE_RECIPIENT_ID)} label={<span className="player-label"><span className="player-dot future" aria-hidden="true" />Players who join later</span>} description="Anyone who joins while this Ping is active will receive it." />{available.map((player) => <Toggle key={player.id} checked={recipients.has(player.id)} onChange={() => toggleRecipient(player.id)} label={<span className="player-label"><span className="player-dot" style={player.color ? { backgroundColor: player.color } : undefined} aria-hidden="true" />{player.name}</span>} />)}</div>
     </section>
 
     <section className="panel stack compact">

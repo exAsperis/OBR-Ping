@@ -75,7 +75,7 @@ export function PingCard({ ping, responses, currentPlayer, role, settings, metad
     if (ping.type !== "nomination") return;
     const cleaned = curated.map((item) => item.trim()).filter(Boolean).slice(0, 8);
     if (cleaned.length < 2) { setError("Keep at least two nominations to create a Vote."); return; }
-    const vote: PingRecord = { schemaVersion: SCHEMA_VERSION, id: crypto.randomUUID(), type: "vote", sender: currentPlayer, recipients: ping.recipients, createdAt: Date.now(), status: "active", content: { question: ping.content.prompt, mode: "single", options: cleaned.map((label) => ({ id: crypto.randomUUID(), label })) } };
+    const vote: PingRecord = { schemaVersion: SCHEMA_VERSION, id: crypto.randomUUID(), type: "vote", sender: currentPlayer, recipients: ping.recipients, ...(ping.includeFutureRecipients ? { includeFutureRecipients: true } : {}), createdAt: Date.now(), status: "active", content: { question: ping.content.prompt, mode: "single", options: cleaned.map((label) => ({ id: crypto.randomUUID(), label })) } };
     setBusy(true); try { await savePing(vote, metadata); onChanged(); } catch (cause) { setError(cause instanceof Error ? cause.message : "Unable to create the Vote."); } finally { setBusy(false); }
   };
 
@@ -107,7 +107,7 @@ export function PingCard({ ping, responses, currentPlayer, role, settings, metad
 
   const renderResults = () => {
     if (ping.status === "cancelled") return <div className="notice">This Ping was cancelled.</div>;
-    if (ping.status !== "completed" && !expired) return <p className="muted">{relevant.length} of {ping.recipients.length} responded</p>;
+    if (ping.status !== "completed" && !expired) return <p className="muted">{ping.includeFutureRecipients ? `${relevant.length} responses` : `${relevant.length} of ${ping.recipients.length} responded`}</p>;
     if (ping.type === "quiz") return <ol className="results-list">{quizStandings(ping, responses).map((standing, index) => <li key={standing.player.id}><span><strong>{index + 1}. {standing.player.name}</strong><small>{standing.answered ? standing.correct ? "Correct" : "Incorrect" : "No answer"}</small></span><span>{standing.elapsedMs !== undefined ? formatDuration(standing.elapsedMs) : "—"}</span></li>)}</ol>;
     if (ping.type === "vote") {
       if (ping.content.mode === "single") { const totals = voteTotals(ping, responses); return <ol className="results-list">{[...ping.content.options].sort((a, b) => totals[b.id] - totals[a.id]).map((option) => <li key={option.id}><span>{option.label}</span><strong>{totals[option.id]}</strong></li>)}</ol>; }
@@ -115,7 +115,7 @@ export function PingCard({ ping, responses, currentPlayer, role, settings, metad
     }
     if (ping.type === "nomination") return manager ? <div className="stack compact"><p className="muted">Edit, combine, or remove responses before creating a separate Vote.</p>{curated.map((item, index) => <div className="curated-option-editor" key={index}><input maxLength={100} value={item} onChange={(event) => setCurated((previous) => previous.map((value, itemIndex) => itemIndex === index ? event.target.value : value))} /><button className="icon-button" aria-label="Remove nomination" onClick={() => setCurated((previous) => previous.filter((_, itemIndex) => itemIndex !== index))}>×</button></div>)}<div className="button-row"><button className="secondary-button" disabled={busy} onClick={() => void saveCuration()}>Save list</button><button className="primary-button" disabled={busy || !canCreate(role, "vote", settings)} onClick={() => void createVote()}>Create Vote</button></div></div> : <p className="muted">The sender is reviewing the nominations.</p>;
     const reads = relevant.filter((response) => response.type === "message").length;
-    return <p className="muted">Read by {reads} of {ping.recipients.length} recipients.</p>;
+    return <p className="muted">{ping.includeFutureRecipients ? `Read by ${reads} recipients.` : `Read by ${reads} of ${ping.recipients.length} recipients.`}</p>;
   };
 
   const replyAllowed = ping.type === "message" && recipient && ping.content.allowReply && canCreate(role, "message", settings);
