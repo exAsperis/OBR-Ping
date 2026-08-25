@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { Metadata } from "@owlbear-rodeo/sdk";
 import { DEFAULT_DEADLINE_MS, DEFAULT_EXPIRY_MS, SCHEMA_VERSION, canCreate, excerpt, type MessagePing, type Participant, type PingRecord, type PingType, type RoomSettings } from "../domain";
 import { CapacityError, savePing } from "../storage";
@@ -70,7 +70,16 @@ export function ComposePing({ role, currentPlayer, players, settings, metadata, 
   const [allowReplyAll, setAllowReplyAll] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => { const timer = window.setInterval(() => setNow(Date.now()), 1000); return () => window.clearInterval(timer); }, []);
   const playerRepliesEnabled = settings.allowPlayers && settings.allowedTypes.message;
+  const hasRecipients = recipients.has(FUTURE_RECIPIENT_ID) || available.some((player) => recipients.has(player.id));
+  const validOptions = options.filter((option) => option.value.trim());
+  const optionsValid = type !== "quiz" && type !== "vote" || (validOptions.length >= 2 && (type !== "quiz" || validOptions.some((option) => correct.has(option.id))));
+  const validationExpiry = resolveTime(expiry, now, "Automatic deletion").value;
+  const validationDeadline = type === "message" ? undefined : resolveTime(deadline, now, "Deadline").value;
+  const timingValid = validationExpiry !== undefined && (type === "message" || validationDeadline !== undefined && validationExpiry > validationDeadline);
+  const canSend = !submitting && canCreate(role, type, settings) && hasRecipients && Boolean(prompt.trim()) && optionsValid && timingValid;
 
   const selectType = (next: PingType) => {
     setType(next); setError(null); setMode("single");
@@ -119,8 +128,8 @@ export function ComposePing({ role, currentPlayer, players, settings, metadata, 
     } else if (type === "nomination") {
       ping = { ...base, deadlineAt: resolvedDeadline!.value!, type, content: { prompt: text } };
     } else {
-      const built = options.map((option) => ({ id: option.id, label: option.value.trim() }));
-      if (built.length < 2 || built.some((option) => !option.label)) { setError("Provide at least two non-empty options."); return; }
+      const built = options.map((option) => ({ id: option.id, label: option.value.trim() })).filter((option) => option.label);
+      if (built.length < 2) { setError("Provide at least two non-empty options."); return; }
       if (type === "quiz") {
         const correctOptionIds = built.filter((option) => correct.has(option.id)).map((option) => option.id);
         if (!correctOptionIds.length) { setError("Choose at least one correct answer."); return; }
@@ -137,7 +146,7 @@ export function ComposePing({ role, currentPlayer, players, settings, metadata, 
     {prefill ? <div className="reply-compose-label"><PingGlyph type="message" />{prefill.replyAll ? "Reply all" : "Reply"} to {prefill.source.sender.name}</div> : <div className="segmented type-picker" aria-label="Ping type">{typeOrder.map((item) => <button key={item} type="button" className={`${type === item ? "active " : ""}type-${item}`} disabled={!canCreate(role, item, settings)} onClick={() => selectType(item)}><PingGlyph type={item} /><span>{labels[item]}</span></button>)}</div>}
 
     <section className="panel">
-      <div className="section-heading"><div><span className="eyebrow">Recipients</span><h3>{recipients.size || "No"} selected</h3></div><button type="button" className="text-button" onClick={() => setRecipients(new Set([...available.map((player) => player.id), FUTURE_RECIPIENT_ID]))}>Everyone</button></div>
+      <div className="section-heading recipient-heading"><span className="eyebrow">Recipients</span><button type="button" className="text-button" onClick={() => setRecipients(new Set([...available.map((player) => player.id), FUTURE_RECIPIENT_ID]))}>Everyone</button></div>
       <div className="choice-list compact-choices"><Toggle plain checked={recipients.has(FUTURE_RECIPIENT_ID)} onChange={() => toggleRecipient(FUTURE_RECIPIENT_ID)} label={<span className="player-label"><span className="player-dot future" aria-hidden="true" />Players who join later <span className="info-tooltip" tabIndex={0} aria-label="Anyone who joins while this Ping is active will receive it." data-tooltip="Anyone who joins while this Ping is active will receive it." onClick={(event) => event.preventDefault()}>i</span></span>} />{available.map((player) => <Toggle plain key={player.id} checked={recipients.has(player.id)} onChange={() => toggleRecipient(player.id)} label={<span className="player-label"><span className="player-dot" style={player.color ? { backgroundColor: player.color } : undefined} aria-hidden="true" />{player.name}</span>} />)}</div>
     </section>
 
@@ -152,7 +161,7 @@ export function ComposePing({ role, currentPlayer, players, settings, metadata, 
       {type !== "message" && <TimeEditor label="Deadline" draft={deadline} defaultMs={DEFAULT_DEADLINE_MS} onChange={setDeadline} />}
       <TimeEditor label="Automatic deletion" draft={expiry} defaultMs={DEFAULT_EXPIRY_MS} onChange={setExpiry} />
       {error && <div className="notice error" role="alert">{error}</div>}
-      <button className="primary-button" disabled={submitting || !canCreate(role, type, settings)}>{submitting ? "Sending…" : `Send ${labels[type]}`}</button>
+      <button className={`primary-button send-button type-${type}`} disabled={!canSend}>{submitting ? "Sending…" : `Send ${labels[type]}`}</button>
     </section>
   </form>;
 }

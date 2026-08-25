@@ -10,18 +10,28 @@ describe("ComposePing", () => {
   it("renders practical limits and connected recipient controls", () => {
     render(<ComposePing role="GM" currentPlayer={gm} players={[gm, player]} settings={DEFAULT_SETTINGS} metadata={{}} onCreated={() => undefined} />);
     expect(screen.getByText("Player")).toBeTruthy();
+    expect(screen.queryByText(/selected$/)).toBeNull();
     expect(screen.getByText("Player").parentElement?.querySelector<HTMLElement>(".player-dot")?.style.backgroundColor).toBe("rgb(25, 169, 116)");
     const message = screen.getByLabelText("Message") as HTMLTextAreaElement;
     expect(message.maxLength).toBe(300);
     expect(message.rows).toBe(3);
     expect(screen.getByText(/Players cannot reply right now/)).toBeTruthy();
     expect(screen.getByLabelText("Allow reply").nextElementSibling?.classList.contains("toggle-track")).toBe(true);
+    const sendMessage = screen.getByRole("button", { name: "Send Message" }) as HTMLButtonElement;
+    expect(sendMessage.disabled).toBe(true);
+    fireEvent.click(screen.getByRole("checkbox", { name: "Player" }));
+    fireEvent.change(message, { target: { value: "Ready?" } });
+    expect(sendMessage.disabled).toBe(false);
     fireEvent.click(screen.getByRole("button", { name: "Quiz" }));
     expect((screen.getByLabelText("Question") as HTMLTextAreaElement).maxLength).toBe(300);
     expect(screen.getByText("Options")).toBeTruthy();
     expect(screen.getAllByRole("button", { name: "From time of sending" }).every((button) => button.classList.contains("active"))).toBe(true);
     expect((screen.getByLabelText("Deadline minutes") as HTMLInputElement).value).toBe("5");
     expect((screen.getByLabelText("Automatic deletion days") as HTMLInputElement).value).toBe("1");
+    expect((screen.getByRole("button", { name: "Send Quiz" }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.change(screen.getByLabelText("Option 1"), { target: { value: "Yes" } });
+    fireEvent.change(screen.getByLabelText("Option 2"), { target: { value: "No" } });
+    expect((screen.getByRole("button", { name: "Send Quiz" }) as HTMLButtonElement).disabled).toBe(false);
     fireEvent.click(screen.getAllByRole("button", { name: "Specific date/time" })[0]);
     expect(screen.getByLabelText("Deadline date and time")).toBeTruthy();
   });
