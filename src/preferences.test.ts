@@ -12,6 +12,12 @@ describe("local preferences", () => {
     setSeenPings(["a", "b"]);
     expect([...getSeenPings()]).toEqual(["a", "b"]);
   });
+  it("isolates delivery history between Owlbear players", () => {
+    setSeenPings(["ping-a"], "player-a");
+    setSeenPings(["ping-b"], "player-b");
+    expect([...getSeenPings("player-a")]).toEqual(["ping-a"]);
+    expect([...getSeenPings("player-b")]).toEqual(["ping-b"]);
+  });
   it("enables delivery sounds by default and persists an override", () => {
     expect(getSoundEnabled()).toBe(true);
     setSoundEnabled(false);

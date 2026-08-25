@@ -13,6 +13,7 @@ let previousStatuses = new Map<string, PingRecord["status"]>();
 let previouslyRelevant = new Set<string>();
 let notificationPingId: string | null = null;
 const shownSessionResults = new Set<string>();
+const warnedPopoverFailures = new Set<string>();
 
 function notificationUrl(pingId: string) {
   const url = new URL("extension.html", window.location.href);
@@ -21,18 +22,28 @@ function notificationUrl(pingId: string) {
 }
 
 async function openNotificationPopover(pingId: string) {
-  await OBR.popover.close(NOTIFICATION_POPOVER_ID).catch(() => undefined);
-  await OBR.popover.open({
-    id: NOTIFICATION_POPOVER_ID,
-    url: notificationUrl(pingId),
-    width: 420,
-    height: 640,
-    anchorReference: "POSITION",
-    anchorPosition: { left: 24, top: 72 },
-    anchorOrigin: { horizontal: "LEFT", vertical: "TOP" },
-    transformOrigin: { horizontal: "LEFT", vertical: "TOP" },
-  });
-  notificationPingId = pingId;
+  try {
+    await OBR.popover.close(NOTIFICATION_POPOVER_ID).catch(() => undefined);
+    await OBR.popover.open({
+      id: NOTIFICATION_POPOVER_ID,
+      url: notificationUrl(pingId),
+      width: 420,
+      height: 640,
+      anchorReference: "POSITION",
+      anchorPosition: { left: 24, top: 72 },
+      anchorOrigin: { horizontal: "LEFT", vertical: "TOP" },
+      transformOrigin: { horizontal: "LEFT", vertical: "TOP" },
+      disableClickAway: true,
+    });
+    warnedPopoverFailures.delete(pingId);
+    notificationPingId = pingId;
+  } catch (cause) {
+    if (!warnedPopoverFailures.has(pingId)) {
+      warnedPopoverFailures.add(pingId);
+      await OBR.notification.show(`Ping could not open its separate popover: ${cause instanceof Error ? cause.message : "unknown Owlbear error"}`, "ERROR").catch(() => undefined);
+    }
+    throw cause;
+  }
 }
 
 async function synchronize(providedMetadata?: Awaited<ReturnType<typeof OBR.room.getMetadata>>) {
@@ -49,7 +60,7 @@ async function synchronize(providedMetadata?: Awaited<ReturnType<typeof OBR.room
     const { pings, responses } = readRoomState(metadata);
     const waiting = waitingPings(pings, responses, OBR.player.id);
     await OBR.action.setBadgeText(waiting.length ? (waiting.length > 99 ? "99+" : String(waiting.length)) : undefined);
-    const seen = getSeenPings();
+    const seen = getSeenPings(OBR.player.id);
     const incoming = waiting.filter((ping) => !seen.has(ping.id));
     const preference = getNotificationPreference();
     if (incoming.length) {
@@ -72,7 +83,7 @@ async function synchronize(providedMetadata?: Awaited<ReturnType<typeof OBR.room
     else if (completed.length && preference === "badge-toast") await OBR.notification.show(`${completed[0].type === "quiz" ? "Quiz" : completed[0].type === "vote" ? "Vote" : "Nomination"} results are ready.`, "INFO");
     await progressHostSession(metadata, pings, responses, OBR.player.id).catch(async (cause) => { await stopSession(metadata, OBR.player.id, false).catch(() => undefined); await OBR.notification.show(cause instanceof Error ? cause.message : "Unable to advance the Ping session.", "ERROR"); });
     for (const ping of waiting) seen.add(ping.id);
-    setSeenPings(seen);
+    setSeenPings(seen, OBR.player.id);
     previousStatuses = new Map(pings.map((ping) => [ping.id, ping.status]));
     previouslyRelevant = new Set(pings.filter((ping) => ping.status === "active" && isRecipient(ping, OBR.player.id)).map((ping) => ping.id));
     initialized = true;

@@ -22,13 +22,15 @@ export function setSoundEnabled(value: boolean) {
   try { localStorage.setItem(SOUND_KEY, String(value)); } catch { /* Sound remains at its default. */ }
 }
 
-export function getSeenPings(): Set<string> {
+const seenKey = (playerId?: string) => playerId ? `${SEEN_KEY}/${encodeURIComponent(playerId)}` : SEEN_KEY;
+
+export function getSeenPings(playerId?: string): Set<string> {
   try {
-    const parsed: unknown = JSON.parse(localStorage.getItem(SEEN_KEY) ?? "[]");
+    const parsed: unknown = JSON.parse(localStorage.getItem(seenKey(playerId)) ?? "[]");
     return new Set(Array.isArray(parsed) && parsed.every((item) => typeof item === "string") ? parsed : []);
   } catch { return new Set(); }
 }
 
-export function setSeenPings(ids: Iterable<string>) {
-  try { localStorage.setItem(SEEN_KEY, JSON.stringify([...ids].slice(-200))); } catch { /* Badge still works without persistence. */ }
+export function setSeenPings(ids: Iterable<string>, playerId?: string) {
+  try { localStorage.setItem(seenKey(playerId), JSON.stringify([...ids].slice(-200))); } catch { /* Badge still works without persistence. */ }
 }
