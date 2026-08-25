@@ -84,6 +84,7 @@ fieldset { border: 0; margin: 0; padding: 0; } legend { margin-bottom: .4rem; }
 .status { border-radius: 999px; padding: .25rem .45rem; background: color-mix(in srgb, var(--text) 8%, transparent); color: var(--muted); font-size: .62rem; font-weight: 900; text-transform: uppercase; }
 .status.active { color: #32805e; }.status.cancelled { color: #b34848; }
 .timer { display: inline-block; margin: 0 0 .7rem; padding: .35rem .55rem; border-radius: 8px; background: color-mix(in srgb, var(--primary) 14%, transparent); font-variant-numeric: tabular-nums; font-size: .76rem; font-weight: 850; }
+.deletion-time { margin: -.15rem 0 .7rem; color: var(--muted); font-size: .68rem; }
 .reply-reference { border-left: 3px solid var(--border); padding-left: .6rem; color: var(--muted); font-size: .74rem; }
 .results { margin-top: .7rem; }.results-list { list-style: none; margin: 0; padding: 0; }.results-list li { display: flex; justify-content: space-between; gap: 1rem; padding: .55rem 0; border-bottom: 1px solid var(--border); font-size: .8rem; }.results-list li:last-child { border-bottom: 0; }.results-list small { display: block; margin-top: .15rem; }
 .rank-list { margin: 0; padding-left: 1.6rem; }.rank-list li { padding: .35rem 0 .35rem .2rem; display: list-item; }.rank-list li::marker { font-weight: 900; }.rank-list li > span { display: inline-flex; align-items: center; justify-content: space-between; width: calc(100% - .2rem); }

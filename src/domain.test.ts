@@ -1,13 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_SETTINGS, SCHEMA_VERSION, canCreate, instantRunoff, isComplete, isRecipient, metadataBytes, parsePing, parseSettings, pingKey, projectedMetadata, quizStandings, readRoomState, replyRecipients, responseKey, waitingPings, type MessagePing, type PingResponse, type QuizPing, type VotePing } from "./domain";
+import { DEFAULT_EXPIRY_MS, DEFAULT_SETTINGS, SCHEMA_VERSION, canCreate, instantRunoff, isComplete, isRecipient, metadataBytes, parsePing, parseSettings, pingKey, projectedMetadata, quizStandings, readRoomState, replyRecipients, responseKey, waitingPings, type MessagePing, type PingResponse, type QuizPing, type VotePing } from "./domain";
 import { METADATA_LIMIT_BYTES, SETTINGS_KEY } from "./constants";
 
 const gm = { id: "gm", name: "Game Master" };
 const ada = { id: "ada", name: "Ada" };
 const ben = { id: "ben", name: "Ben" };
 const options = [{ id: "a", label: "Alpha" }, { id: "b", label: "Beta" }, { id: "c", label: "Gamma" }];
-const quiz: QuizPing = { schemaVersion: SCHEMA_VERSION, id: "quiz-1", type: "quiz", sender: gm, recipients: [ada, ben], createdAt: 1000, expiresAt: 61_000, status: "active", content: { question: "Choose", mode: "multiple", options, correctOptionIds: ["a", "c"] } };
-const vote: VotePing = { schemaVersion: SCHEMA_VERSION, id: "vote-1", type: "vote", sender: gm, recipients: [ada, ben], createdAt: 1000, status: "active", content: { question: "Choose", mode: "ranked", options } };
+const quiz: QuizPing = { schemaVersion: SCHEMA_VERSION, id: "quiz-1", type: "quiz", sender: gm, recipients: [ada, ben], createdAt: 1000, deadlineAt: 61_000, expiresAt: 700_000, status: "active", content: { question: "Choose", mode: "multiple", options, correctOptionIds: ["a", "c"] } };
+const vote: VotePing = { schemaVersion: SCHEMA_VERSION, id: "vote-1", type: "vote", sender: gm, recipients: [ada, ben], createdAt: 1000, deadlineAt: 61_000, expiresAt: 700_000, status: "active", content: { question: "Choose", mode: "ranked", options } };
 
 describe("runtime validation", () => {
   it("accepts valid records and rejects malformed or oversized values", () => {
@@ -22,6 +22,16 @@ describe("runtime validation", () => {
     const state = readRoomState({ [pingKey(quiz.id)]: quiz, [responseKey(quiz.id, ada.id)]: response, [`${responseKey(quiz.id, ben.id)}-spoof`]: { ...response, playerId: ben.id }, unrelated: 4 });
     expect(state.pings).toHaveLength(1);
     expect(state.responses).toEqual([response]);
+  });
+
+  it("normalizes a legacy interaction expiry into a deadline plus retention", () => {
+    const { deadlineAt: _deadline, expiresAt: _expiry, ...legacy } = quiz;
+    const parsed = parsePing({ ...legacy, expiresAt: 61_000 });
+    expect(parsed).toMatchObject({ deadlineAt: 61_000, expiresAt: 61_000 + DEFAULT_EXPIRY_MS });
+  });
+
+  it("rejects normalized interactions whose deletion is not after the deadline", () => {
+    expect(parsePing({ ...quiz, expiresAt: quiz.deadlineAt })).toBeNull();
   });
 });
 
@@ -82,7 +92,7 @@ describe("metadata accounting and replies", () => {
   });
 
   it("deduplicates Reply All and excludes the current player", () => {
-    const message: MessagePing = { schemaVersion: 1, id: "m", type: "message", sender: gm, recipients: [ada, ben, ada], createdAt: 1, status: "active", content: { message: "Hi", allowReply: true, allowReplyAll: true } };
+    const message: MessagePing = { schemaVersion: 1, id: "m", type: "message", sender: gm, recipients: [ada, ben, ada], createdAt: 1, expiresAt: 700_000, status: "active", content: { message: "Hi", allowReply: true, allowReplyAll: true } };
     expect(replyRecipients(message, ada.id, true).map((item) => item.id)).toEqual(["gm", "ben"]);
   });
 });

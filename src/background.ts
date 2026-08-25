@@ -1,6 +1,6 @@
 import OBR from "@owlbear-rodeo/sdk";
-import { isRecipient, readRoomState, responseFor, waitingPings, type PingRecord } from "./domain";
-import { completionUpdate } from "./lifecycle";
+import { isRecipient, projectedMetadata, readRoomState, responseFor, waitingPings, type PingRecord } from "./domain";
+import { lifecycleUpdate } from "./lifecycle";
 import { NOTIFICATION_POPOVER_ID } from "./constants";
 import { getNotificationPreference, getSeenPings, getSoundEnabled, setSeenPings } from "./preferences";
 import { playPingSound } from "./sound";
@@ -37,10 +37,10 @@ async function synchronize(providedMetadata?: Awaited<ReturnType<typeof OBR.room
   try {
     let metadata = providedMetadata ?? await OBR.room.getMetadata();
     const relevantBeforeCompletion = new Set(readRoomState(metadata).pings.filter((ping) => ping.status === "active" && isRecipient(ping, OBR.player.id)).map((ping) => ping.id));
-    const completion = completionUpdate(metadata);
-    if (Object.keys(completion).length) {
-      await safeSetMetadata(completion, metadata);
-      metadata = { ...metadata, ...completion };
+    const lifecycle = lifecycleUpdate(metadata);
+    if (Object.keys(lifecycle).length) {
+      await safeSetMetadata(lifecycle, metadata);
+      metadata = projectedMetadata(metadata, lifecycle).metadata;
     }
     const { pings, responses } = readRoomState(metadata);
     const waiting = waitingPings(pings, responses, OBR.player.id);

@@ -1,6 +1,8 @@
 import { EXTENSION_ID, METADATA_LIMIT_BYTES, PING_PREFIX, RESPONSE_PREFIX, SETTINGS_KEY } from "./constants";
 
 export const SCHEMA_VERSION = 1 as const;
+export const DEFAULT_DEADLINE_MS = 5 * 60_000;
+export const DEFAULT_EXPIRY_MS = 7 * 24 * 60 * 60_000;
 export type PingType = "quiz" | "vote" | "nomination" | "message";
 export type PingStatus = "active" | "completed" | "cancelled";
 export type ChoiceMode = "single" | "multiple";
@@ -37,7 +39,7 @@ interface BasePing {
   recipients: Participant[];
   includeFutureRecipients?: boolean;
   createdAt: number;
-  expiresAt?: number;
+  expiresAt: number;
   status: PingStatus;
   completedAt?: number;
   cancelledAt?: number;
@@ -45,6 +47,7 @@ interface BasePing {
 
 export interface QuizPing extends BasePing {
   type: "quiz";
+  deadlineAt: number;
   content: {
     question: string;
     mode: ChoiceMode;
@@ -55,11 +58,13 @@ export interface QuizPing extends BasePing {
 
 export interface VotePing extends BasePing {
   type: "vote";
+  deadlineAt: number;
   content: { question: string; mode: VoteMode; options: Option[] };
 }
 
 export interface NominationPing extends BasePing {
   type: "nomination";
+  deadlineAt: number;
   content: { prompt: string; curated?: string[] };
 }
 
@@ -119,11 +124,24 @@ export function parseSettings(value: unknown): RoomSettings {
 
 export function parsePing(value: unknown): PingRecord | null {
   if (!isObject(value) || value.schemaVersion !== SCHEMA_VERSION || !isString(value.id) || !["quiz", "vote", "nomination", "message"].includes(String(value.type)) || !isParticipant(value.sender) || !Array.isArray(value.recipients) || !value.recipients.every(isParticipant) || (value.recipients.length === 0 && value.includeFutureRecipients !== true) || (value.includeFutureRecipients !== undefined && typeof value.includeFutureRecipients !== "boolean") || !isFiniteNumber(value.createdAt) || !["active", "completed", "cancelled"].includes(String(value.status)) || !isObject(value.content)) return null;
-  if (value.expiresAt !== undefined && (!isFiniteNumber(value.expiresAt) || value.expiresAt <= value.createdAt)) return null;
+  const legacy = value.deadlineAt === undefined;
+  let expiresAt: number;
+  let deadlineAt: number | undefined;
+  if (value.type === "message") {
+    if (value.deadlineAt !== undefined) return null;
+    expiresAt = value.expiresAt === undefined ? value.createdAt + DEFAULT_EXPIRY_MS : value.expiresAt as number;
+  } else if (legacy) {
+    deadlineAt = value.expiresAt === undefined ? value.createdAt + DEFAULT_DEADLINE_MS : value.expiresAt as number;
+    expiresAt = deadlineAt + DEFAULT_EXPIRY_MS;
+  } else {
+    deadlineAt = value.deadlineAt as number;
+    expiresAt = value.expiresAt as number;
+  }
+  if (!isFiniteNumber(expiresAt) || expiresAt <= value.createdAt || (deadlineAt !== undefined && (!isFiniteNumber(deadlineAt) || deadlineAt <= value.createdAt || expiresAt <= deadlineAt))) return null;
   const content = value.content;
   switch (value.type) {
     case "quiz": {
-      if (!isString(content.question) || content.question.length < 1 || content.question.length > 300 || !["single", "multiple"].includes(String(content.mode)) || !validOptions(content.options) || !isStringArray(content.correctOptionIds) || content.correctOptionIds.length < 1 || !isFiniteNumber(value.expiresAt)) return null;
+      if (!isString(content.question) || content.question.length < 1 || content.question.length > 300 || !["single", "multiple"].includes(String(content.mode)) || !validOptions(content.options) || !isStringArray(content.correctOptionIds) || content.correctOptionIds.length < 1) return null;
       const ids = new Set((content.options as Option[]).map((option) => option.id));
       if (content.correctOptionIds.some((id) => !ids.has(id)) || (content.mode === "single" && content.correctOptionIds.length !== 1)) return null;
       break;
@@ -138,7 +156,7 @@ export function parsePing(value: unknown): PingRecord | null {
       if (!isString(content.message) || content.message.length < 1 || content.message.length > 1000 || typeof content.allowReply !== "boolean" || typeof content.allowReplyAll !== "boolean") return null;
       break;
   }
-  return value as unknown as PingRecord;
+  return { ...value, expiresAt, ...(deadlineAt === undefined ? {} : { deadlineAt }) } as unknown as PingRecord;
 }
 
 export function parseResponse(value: unknown): PingResponse | null {
@@ -168,21 +186,22 @@ export const pingKey = (pingId: string) => `${PING_PREFIX}${pingId}`;
 export const responseKey = (pingId: string, playerId: string) => `${RESPONSE_PREFIX}${pingId}/${encodeURIComponent(playerId)}`;
 export const responsesFor = (responses: PingResponse[], pingId: string) => responses.filter((response) => response.pingId === pingId);
 export const responseFor = (responses: PingResponse[], pingId: string, playerId: string) => responses.find((response) => response.pingId === pingId && response.playerId === playerId);
-export const isRecipient = (ping: PingRecord, playerId: string, now = Date.now()) => ping.recipients.some((recipient) => recipient.id === playerId) || Boolean(ping.includeFutureRecipients && ping.sender.id !== playerId && ping.status === "active" && (ping.expiresAt === undefined || now < ping.expiresAt));
+export const isRecipient = (ping: PingRecord, playerId: string, now = Date.now()) => ping.recipients.some((recipient) => recipient.id === playerId) || Boolean(ping.includeFutureRecipients && ping.sender.id !== playerId && ping.status === "active" && now < (ping.type === "message" ? ping.expiresAt : ping.deadlineAt));
 export const canCreate = (role: "GM" | "PLAYER", type: PingType, settings: RoomSettings) => role === "GM" || (settings.allowPlayers && settings.allowedTypes[type]);
 export const canManage = (ping: PingRecord, playerId: string, role: "GM" | "PLAYER") => role === "GM" || ping.sender.id === playerId;
-export const isExpired = (ping: PingRecord, now = Date.now()) => ping.status === "active" && ping.expiresAt !== undefined && now >= ping.expiresAt;
+export const isPastDeadline = (ping: PingRecord, now = Date.now()) => ping.type !== "message" && ping.status === "active" && now >= ping.deadlineAt;
+export const isDeletionDue = (ping: PingRecord, now = Date.now()) => now >= ping.expiresAt;
 
 export function isComplete(ping: PingRecord, responses: PingResponse[], now = Date.now()) {
   if (ping.status !== "active") return true;
-  if (isExpired(ping, now)) return true;
+  if (isPastDeadline(ping, now)) return true;
   if (ping.includeFutureRecipients) return false;
   const answered = new Set(responsesFor(responses, ping.id).map((response) => response.playerId));
   return ping.recipients.every((recipient) => answered.has(recipient.id));
 }
 
 export function waitingPings(pings: PingRecord[], responses: PingResponse[], playerId: string, now = Date.now()) {
-  return pings.filter((ping) => ping.status === "active" && !isExpired(ping, now) && isRecipient(ping, playerId, now) && !responseFor(responses, ping.id, playerId));
+  return pings.filter((ping) => ping.status === "active" && !isDeletionDue(ping, now) && !isPastDeadline(ping, now) && isRecipient(ping, playerId, now) && !responseFor(responses, ping.id, playerId));
 }
 
 const sameSet = (left: string[], right: string[]) => left.length === right.length && left.every((value) => right.includes(value));

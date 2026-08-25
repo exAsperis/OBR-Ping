@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from "react";
 import type { Metadata } from "@owlbear-rodeo/sdk";
-import { SCHEMA_VERSION, canCreate, excerpt, type MessagePing, type Participant, type PingRecord, type PingType, type RoomSettings } from "../domain";
+import { DEFAULT_DEADLINE_MS, DEFAULT_EXPIRY_MS, SCHEMA_VERSION, canCreate, excerpt, type MessagePing, type Participant, type PingRecord, type PingType, type RoomSettings } from "../domain";
 import { CapacityError, savePing } from "../storage";
 import { PingGlyph } from "./PingGlyph";
 import { Toggle } from "./Toggle";
@@ -23,6 +23,7 @@ interface Props {
 
 interface DraftOption { id: string; value: string }
 type ExpirationMethod = "relative" | "specific";
+interface TimeDraft { method: ExpirationMethod; days: string; hours: string; minutes: string; specific: string }
 const makeOption = (): DraftOption => ({ id: crypto.randomUUID(), value: "" });
 const typeOrder: PingType[] = ["message", "vote", "quiz", "nomination"];
 const labels: Record<PingType, string> = { quiz: "Quiz", vote: "Vote", nomination: "Nomination", message: "Message" };
@@ -32,6 +33,26 @@ const localDateTime = (time: number) => {
   const date = new Date(time - new Date().getTimezoneOffset() * 60_000);
   return date.toISOString().slice(0, 16);
 };
+
+const deadlineDefault: TimeDraft = { method: "relative", days: "", hours: "", minutes: "5", specific: "" };
+const expiryDefault: TimeDraft = { method: "relative", days: "7", hours: "", minutes: "", specific: "" };
+
+function resolveTime(draft: TimeDraft, createdAt: number, label: string): { value?: number; error?: string } {
+  if (draft.method === "specific") {
+    const value = draft.specific ? new Date(draft.specific).getTime() : NaN;
+    return Number.isFinite(value) && value > createdAt ? { value } : { error: `${label} must be in the future.` };
+  }
+  const parts = [draft.days, draft.hours, draft.minutes].map((value) => value === "" ? 0 : Number(value));
+  if (parts.some((value) => !Number.isSafeInteger(value) || value < 0) || parts[1] > 23 || parts[2] > 59) return { error: `${label} must use whole non-negative numbers, with hours up to 23 and minutes up to 59.` };
+  const duration = ((parts[0] * 24 + parts[1]) * 60 + parts[2]) * 60_000;
+  if (!Number.isSafeInteger(duration)) return { error: `${label} is too far in the future.` };
+  return duration > 0 ? { value: createdAt + duration } : { error: `${label} must be after the send time.` };
+}
+
+function TimeEditor({ label, draft, defaultMs, onChange }: { label: string; draft: TimeDraft; defaultMs: number; onChange: (draft: TimeDraft) => void }) {
+  const setMethod = (method: ExpirationMethod) => onChange({ ...draft, method, ...(method === "specific" && !draft.specific ? { specific: localDateTime(Date.now() + defaultMs) } : {}) });
+  return <fieldset className="expiration-editor"><legend>{label}</legend><div className="segmented small expiration-method" aria-label={`${label} method`}><button type="button" className={draft.method === "relative" ? "active" : ""} onClick={() => setMethod("relative")}>From time of sending</button><button type="button" className={draft.method === "specific" ? "active" : ""} onClick={() => setMethod("specific")}>Specific date/time</button></div>{draft.method === "relative" ? <div className="duration-inputs"><label>Days<input aria-label={`${label} days`} type="number" min="0" step="1" inputMode="numeric" value={draft.days} onChange={(event) => onChange({ ...draft, days: event.target.value })} /></label><label>Hours<input aria-label={`${label} hours`} type="number" min="0" max="23" step="1" inputMode="numeric" value={draft.hours} onChange={(event) => onChange({ ...draft, hours: event.target.value })} /></label><label>Minutes<input aria-label={`${label} minutes`} type="number" min="0" max="59" step="1" inputMode="numeric" value={draft.minutes} onChange={(event) => onChange({ ...draft, minutes: event.target.value })} /></label></div> : <label>{label} date and time<input aria-label={`${label} date and time`} type="datetime-local" required value={draft.specific} onChange={(event) => onChange({ ...draft, specific: event.target.value })} /></label>}<p className="muted">{draft.method === "relative" ? "Measured from when the Ping is sent." : "Uses your device’s local date and time."}</p></fieldset>;
+}
 
 export function ComposePing({ role, currentPlayer, players, settings, metadata, prefill, onCreated }: Props) {
   const initialOptions = useRef<DraftOption[]>([makeOption(), makeOption()]);
@@ -44,25 +65,17 @@ export function ComposePing({ role, currentPlayer, players, settings, metadata, 
   const [options, setOptions] = useState(initialOptions.current);
   const [correct, setCorrect] = useState(() => new Set([initialOptions.current[0].id]));
   const [draggedOption, setDraggedOption] = useState<string | null>(null);
-  const [expirationMethod, setExpirationMethod] = useState<ExpirationMethod>("relative");
-  const [expirationDays, setExpirationDays] = useState("");
-  const [expirationHours, setExpirationHours] = useState("");
-  const [expirationMinutes, setExpirationMinutes] = useState("");
-  const [specificExpiration, setSpecificExpiration] = useState("");
+  const [deadline, setDeadline] = useState<TimeDraft>(deadlineDefault);
+  const [expiry, setExpiry] = useState<TimeDraft>(expiryDefault);
   const [allowReply, setAllowReply] = useState(true);
   const [allowReplyAll, setAllowReplyAll] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const playerRepliesEnabled = settings.allowPlayers && settings.allowedTypes.message;
-  const hasRelativeExpiration = [expirationDays, expirationHours, expirationMinutes].some((value) => value !== "" && Number(value) !== 0);
 
   const selectType = (next: PingType) => {
     setType(next); setError(null); setMode("single");
     setCorrect((previous) => new Set([previous.values().next().value ?? options[0].id]));
-    if (next === "quiz") {
-      if (expirationMethod === "relative" && !hasRelativeExpiration) setExpirationMinutes("1");
-      if (expirationMethod === "specific" && !specificExpiration) setSpecificExpiration(localDateTime(Date.now() + 60_000));
-    }
   };
   const toggleRecipient = (id: string) => setRecipients((previous) => { const next = new Set(previous); next.has(id) ? next.delete(id) : next.add(id); return next; });
   const updateOption = (id: string, value: string) => setOptions((previous) => previous.map((option) => option.id === id ? { ...option, value } : option));
@@ -95,27 +108,25 @@ export function ComposePing({ role, currentPlayer, players, settings, metadata, 
     const text = prompt.trim();
     if (!text) { setError(type === "message" ? "Enter a message." : "Enter a question or prompt."); return; }
     const createdAt = Date.now();
-    const durationParts = [expirationDays, expirationHours, expirationMinutes].map((value) => value === "" ? 0 : Number(value));
-    if (expirationMethod === "relative" && (durationParts.some((value) => !Number.isSafeInteger(value) || value < 0) || durationParts[1] > 23 || durationParts[2] > 59)) { setError("Use whole non-negative numbers, with hours up to 23 and minutes up to 59."); return; }
-    const durationMs = ((durationParts[0] * 24 + durationParts[1]) * 60 + durationParts[2]) * 60_000;
-    if (expirationMethod === "relative" && !Number.isSafeInteger(durationMs)) { setError("That duration is too large."); return; }
-    const deadline = expirationMethod === "relative" ? durationMs > 0 ? createdAt + durationMs : undefined : specificExpiration ? new Date(specificExpiration).getTime() : undefined;
-    if (deadline !== undefined && (!Number.isFinite(deadline) || deadline <= createdAt)) { setError("The deadline must be in the future."); return; }
-    if (type === "quiz" && deadline === undefined) { setError("A Quiz requires a deadline."); return; }
-    const base = { schemaVersion: SCHEMA_VERSION, id: crypto.randomUUID(), sender: currentPlayer, recipients: selected, ...(includeFutureRecipients ? { includeFutureRecipients: true } : {}), createdAt, expiresAt: deadline, status: "active" as const };
+    const resolvedExpiry = resolveTime(expiry, createdAt, "Automatic deletion");
+    if (resolvedExpiry.error || resolvedExpiry.value === undefined) { setError(resolvedExpiry.error ?? "Automatic deletion is required."); return; }
+    const resolvedDeadline = type === "message" ? undefined : resolveTime(deadline, createdAt, "Deadline");
+    if (resolvedDeadline?.error || (type !== "message" && resolvedDeadline?.value === undefined)) { setError(resolvedDeadline?.error ?? "A deadline is required."); return; }
+    if (resolvedDeadline?.value !== undefined && resolvedExpiry.value <= resolvedDeadline.value) { setError("Automatic deletion must be later than the deadline."); return; }
+    const base = { schemaVersion: SCHEMA_VERSION, id: crypto.randomUUID(), sender: currentPlayer, recipients: selected, ...(includeFutureRecipients ? { includeFutureRecipients: true } : {}), createdAt, expiresAt: resolvedExpiry.value, status: "active" as const };
     let ping: PingRecord;
     if (type === "message") {
       ping = { ...base, type, content: { message: text, allowReply, allowReplyAll, ...(prefill ? { replyTo: { pingId: prefill.source.id, excerpt: excerpt(prefill.source.content.message) } } : {}) } };
     } else if (type === "nomination") {
-      ping = { ...base, type, content: { prompt: text } };
+      ping = { ...base, deadlineAt: resolvedDeadline!.value!, type, content: { prompt: text } };
     } else {
       const built = options.map((option) => ({ id: option.id, label: option.value.trim() }));
       if (built.length < 2 || built.some((option) => !option.label)) { setError("Provide at least two non-empty options."); return; }
       if (type === "quiz") {
         const correctOptionIds = built.filter((option) => correct.has(option.id)).map((option) => option.id);
         if (!correctOptionIds.length) { setError("Choose at least one correct answer."); return; }
-        ping = { ...base, type, content: { question: text, mode: mode === "multiple" ? "multiple" : "single", options: built, correctOptionIds } };
-      } else ping = { ...base, type, content: { question: text, mode: mode === "ranked" ? "ranked" : "single", options: built } };
+        ping = { ...base, deadlineAt: resolvedDeadline!.value!, type, content: { question: text, mode: mode === "multiple" ? "multiple" : "single", options: built, correctOptionIds } };
+      } else ping = { ...base, deadlineAt: resolvedDeadline!.value!, type, content: { question: text, mode: mode === "ranked" ? "ranked" : "single", options: built } };
     }
     setSubmitting(true);
     try { await savePing(ping, metadata); onCreated(); }
@@ -139,7 +150,8 @@ export function ComposePing({ role, currentPlayer, players, settings, metadata, 
         <fieldset><legend>Options</legend><div className="stack compact">{options.map((option, index) => <div className={`option-editor${draggedOption === option.id ? " dragging" : ""}`} key={option.id} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); if (draggedOption) moveOption(draggedOption, index); setDraggedOption(null); }}><button type="button" className="drag-handle" draggable aria-label={`Reorder option ${index + 1}`} title="Drag to reorder" onDragStart={(event) => { event.dataTransfer.effectAllowed = "move"; setDraggedOption(option.id); }} onDragEnd={() => setDraggedOption(null)} onKeyDown={(event) => { if (event.key === "ArrowUp") { event.preventDefault(); moveOption(option.id, index - 1); } else if (event.key === "ArrowDown") { event.preventDefault(); moveOption(option.id, index + 1); } }}>⠿</button><input ref={(element) => { if (element) optionInputs.current.set(option.id, element); else optionInputs.current.delete(option.id); }} aria-label={`Option ${index + 1}`} maxLength={100} value={option.value} onChange={(event) => updateOption(option.id, event.target.value)} placeholder={`Option ${index + 1}`} />{type === "quiz" && (mode === "multiple" ? <Toggle compact label={`Option ${index + 1} is correct`} checked={correct.has(option.id)} onChange={() => toggleCorrect(option.id)} /> : <input aria-label={`Option ${index + 1} is correct`} type="radio" name="correct" checked={correct.has(option.id)} onChange={() => toggleCorrect(option.id)} />)}{options.length > 2 && <button aria-label={`Remove option ${index + 1}`} type="button" className="icon-button" onClick={() => removeOption(option.id)}>×</button>}</div>)}</div>{options.length < 8 && <button type="button" className="text-button add-option" onClick={addOption}>+ Add option</button>}</fieldset>
       </>}
       {type === "message" && <div className="stack compact"><div className="choice-list"><Toggle checked={allowReply} onChange={setAllowReply} label="Allow reply" description="Recipients may send a new Message back to the sender." /><Toggle checked={allowReplyAll} onChange={(checked) => { setAllowReplyAll(checked); if (checked) setAllowReply(true); }} label="Allow reply all" description="Recipients may send a new Message to the original participants." /></div>{!playerRepliesEnabled && <div className="notice warning" role="status">Players cannot reply right now because player-created Messages are disabled in room settings. These options will still apply if the GM enables them later.</div>}</div>}
-      <fieldset className="expiration-editor"><legend>{type === "quiz" ? "Deadline" : type === "message" ? "Expiration (optional)" : "Deadline (optional)"}</legend><div className="segmented small expiration-method" aria-label="Expiration method"><button type="button" className={expirationMethod === "relative" ? "active" : ""} onClick={() => setExpirationMethod("relative")}>From time of sending</button><button type="button" className={expirationMethod === "specific" ? "active" : ""} onClick={() => setExpirationMethod("specific")}>Specific date/time</button></div>{expirationMethod === "relative" ? <div className="duration-inputs"><label>Days<input type="number" min="0" step="1" inputMode="numeric" value={expirationDays} onChange={(event) => setExpirationDays(event.target.value)} /></label><label>Hours<input type="number" min="0" max="23" step="1" inputMode="numeric" value={expirationHours} onChange={(event) => setExpirationHours(event.target.value)} /></label><label>Minutes<input type="number" min="0" max="59" step="1" inputMode="numeric" value={expirationMinutes} onChange={(event) => setExpirationMinutes(event.target.value)} /></label></div> : <label>Expiration date and time<input type="datetime-local" required={type === "quiz"} value={specificExpiration} onChange={(event) => setSpecificExpiration(event.target.value)} /></label>}<p className="muted">{expirationMethod === "relative" ? "The duration starts when the Ping is sent." : "Uses your device’s local date and time."}</p></fieldset>
+      {type !== "message" && <TimeEditor label="Deadline" draft={deadline} defaultMs={DEFAULT_DEADLINE_MS} onChange={setDeadline} />}
+      <TimeEditor label="Automatic deletion" draft={expiry} defaultMs={DEFAULT_EXPIRY_MS} onChange={setExpiry} />
       {error && <div className="notice error" role="alert">{error}</div>}
       <button className="primary-button" disabled={submitting || !canCreate(role, type, settings)}>{submitting ? "Sending…" : `Send ${labels[type]}`}</button>
     </section>

@@ -9,7 +9,8 @@ Ping for Owlbear Rodeo sends short, focused interactions to everyone in a room, 
 - Timed single- and multiple-choice Quizzes with exact-set scoring and time-ranked results
 - Single-choice and instant-runoff ranked-choice Votes
 - Single-line Nominations that the sender can curate into a separate Vote
-- Discrete Messages with read state, optional expiration, Reply, and Reply All
+- Discrete Messages with read state, Reply, and Reply All
+- Separate interaction deadlines and automatic deletion for every Ping
 - Background action badges and configurable separate-popover, toast, or auto-open behavior
 - GM-controlled player creation permissions and room metadata cleanup
 - Full operation with or without an open scene
@@ -53,7 +54,7 @@ pnpm run build
 
 Ping has no backend. Its interactions and responses are stored in Owlbear room metadata under `com.ex-asperis.obr-ping`, and device notification preferences remain in extension-origin browser storage.
 
-Owlbear room metadata is limited to 16 KB across all extensions. Ping checks the projected size before writes and gives the GM a meter showing total room usage, Ping usage, and estimated remaining capacity. Data is never pruned automatically; the GM and interaction senders have explicit cleanup controls.
+Owlbear room metadata is limited to 16 KB across all extensions. Ping checks the projected size before writes and gives the GM a meter showing total room usage, Ping usage, and estimated remaining capacity. Every Ping has a configurable deletion time (seven days after sending by default), when it and its responses are automatically removed. The GM and interaction senders also have explicit cleanup controls.
 
 Vote choices are secret in the Ping interface: results never reveal voter-to-ballot mappings. Owlbear metadata is technically inspectable by room participants, so this is not cryptographic secrecy. Reliability is limited to Owlbear room metadata and stable Owlbear player IDs; there is no cross-room archive or trusted external clock.
 

@@ -1,8 +1,7 @@
 import type { Metadata } from "@owlbear-rodeo/sdk";
-import { isComplete, parsePing, parseResponse, responsesFor, type PingRecord, type PingResponse } from "./domain";
-import { pingKey } from "./domain";
+import { isComplete, isDeletionDue, parsePing, parseResponse, pingKey, responseKey, responsesFor, type PingRecord, type PingResponse } from "./domain";
 
-export function completionUpdate(metadata: Metadata, now = Date.now()) {
+export function lifecycleUpdate(metadata: Metadata, now = Date.now()) {
   const responses: PingResponse[] = [];
   const pings: PingRecord[] = [];
   for (const value of Object.values(metadata)) {
@@ -15,10 +14,15 @@ export function completionUpdate(metadata: Metadata, now = Date.now()) {
   }
   const update: Record<string, unknown> = {};
   for (const ping of pings) {
+    if (isDeletionDue(ping, now)) {
+      update[pingKey(ping.id)] = undefined;
+      for (const key of Object.keys(metadata)) if (key.startsWith(responseKey(ping.id, ""))) update[key] = undefined;
+      continue;
+    }
     if (ping.status === "active" && isComplete(ping, responses, now)) {
       const relevant = responsesFor(responses, ping.id);
-      const allAnswered = ping.recipients.every((recipient) => relevant.some((response) => response.playerId === recipient.id));
-      const completedAt = allAnswered ? Math.max(ping.createdAt, ...relevant.map((response) => response.respondedAt)) : ping.expiresAt ?? now;
+      const allAnswered = !ping.includeFutureRecipients && ping.recipients.every((recipient) => relevant.some((response) => response.playerId === recipient.id));
+      const completedAt = allAnswered ? Math.max(ping.createdAt, ...relevant.map((response) => response.respondedAt)) : ping.type === "message" ? now : ping.deadlineAt;
       update[pingKey(ping.id)] = { ...ping, status: "completed", completedAt };
     }
   }

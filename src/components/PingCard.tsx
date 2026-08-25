@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import type { Metadata } from "@owlbear-rodeo/sdk";
-import { SCHEMA_VERSION, canCreate, canManage, formatDuration, instantRunoff, isExpired, isRecipient, optionLabel, quizStandings, responseFor, responsesFor, voteTotals, type Participant, type PingRecord, type PingResponse, type RoomSettings } from "../domain";
+import { DEFAULT_DEADLINE_MS, DEFAULT_EXPIRY_MS, SCHEMA_VERSION, canCreate, canManage, formatDuration, instantRunoff, isPastDeadline, isRecipient, optionLabel, quizStandings, responseFor, responsesFor, voteTotals, type Participant, type PingRecord, type PingResponse, type RoomSettings } from "../domain";
 import { removePing, savePing, saveResponse } from "../storage";
 import type { MessagePrefill } from "./ComposePing";
 import { PingGlyph } from "./PingGlyph";
@@ -25,8 +25,8 @@ export function PingCard({ ping, responses, currentPlayer, role, settings, metad
   const relevant = responsesFor(responses, ping.id);
   const manager = canManage(ping, currentPlayer.id, role);
   const recipient = isRecipient(ping, currentPlayer.id);
-  const expired = isExpired(ping, now);
-  const active = ping.status === "active" && !expired;
+  const deadlinePassed = isPastDeadline(ping, now);
+  const active = ping.status === "active" && !deadlinePassed;
   const [selected, setSelected] = useState<string[]>(ping.type === "vote" && ping.content.mode === "ranked" ? ping.content.options.map((option) => option.id) : []);
   const [nomination, setNomination] = useState("");
   const initialCurated = useMemo(() => ping.type === "nomination" ? ping.content.curated ?? relevant.filter((item) => item.type === "nomination").map((item) => item.value) : [], [ping, relevant]);
@@ -75,7 +75,8 @@ export function PingCard({ ping, responses, currentPlayer, role, settings, metad
     if (ping.type !== "nomination") return;
     const cleaned = curated.map((item) => item.trim()).filter(Boolean).slice(0, 8);
     if (cleaned.length < 2) { setError("Keep at least two nominations to create a Vote."); return; }
-    const vote: PingRecord = { schemaVersion: SCHEMA_VERSION, id: crypto.randomUUID(), type: "vote", sender: currentPlayer, recipients: ping.recipients, ...(ping.includeFutureRecipients ? { includeFutureRecipients: true } : {}), createdAt: Date.now(), status: "active", content: { question: ping.content.prompt, mode: "single", options: cleaned.map((label) => ({ id: crypto.randomUUID(), label })) } };
+    const createdAt = Date.now();
+    const vote: PingRecord = { schemaVersion: SCHEMA_VERSION, id: crypto.randomUUID(), type: "vote", sender: currentPlayer, recipients: ping.recipients, ...(ping.includeFutureRecipients ? { includeFutureRecipients: true } : {}), createdAt, deadlineAt: createdAt + DEFAULT_DEADLINE_MS, expiresAt: createdAt + DEFAULT_EXPIRY_MS, status: "active", content: { question: ping.content.prompt, mode: "single", options: cleaned.map((label) => ({ id: crypto.randomUUID(), label })) } };
     setBusy(true); try { await savePing(vote, metadata); onChanged(); } catch (cause) { setError(cause instanceof Error ? cause.message : "Unable to create the Vote."); } finally { setBusy(false); }
   };
 
@@ -107,7 +108,7 @@ export function PingCard({ ping, responses, currentPlayer, role, settings, metad
 
   const renderResults = () => {
     if (ping.status === "cancelled") return <div className="notice">This Ping was cancelled.</div>;
-    if (ping.status !== "completed" && !expired) return <p className="muted">{ping.includeFutureRecipients ? `${relevant.length} responses` : `${relevant.length} of ${ping.recipients.length} responded`}</p>;
+    if (ping.status !== "completed" && !deadlinePassed) return <p className="muted">{ping.includeFutureRecipients ? `${relevant.length} responses` : `${relevant.length} of ${ping.recipients.length} responded`}</p>;
     if (ping.type === "quiz") return <ol className="results-list">{quizStandings(ping, responses).map((standing, index) => <li key={standing.player.id}><span><strong>{index + 1}. {standing.player.name}</strong><small>{standing.answered ? standing.correct ? "Correct" : "Incorrect" : "No answer"}</small></span><span>{standing.elapsedMs !== undefined ? formatDuration(standing.elapsedMs) : "—"}</span></li>)}</ol>;
     if (ping.type === "vote") {
       if (ping.content.mode === "single") { const totals = voteTotals(ping, responses); return <ol className="results-list">{[...ping.content.options].sort((a, b) => totals[b.id] - totals[a.id]).map((option) => <li key={option.id}><span>{option.label}</span><strong>{totals[option.id]}</strong></li>)}</ol>; }
@@ -120,10 +121,11 @@ export function PingCard({ ping, responses, currentPlayer, role, settings, metad
 
   const replyAllowed = ping.type === "message" && recipient && ping.content.allowReply && canCreate(role, "message", settings);
   return <article className={`ping-card ${ping.type}`}>
-    <header><div className="ping-heading"><span className="glyph-frame"><PingGlyph type={ping.type} /></span><div><span className="type-chip">{typeLabel[ping.type]}</span><h3>{ping.type === "message" ? ping.content.message : ping.type === "nomination" ? ping.content.prompt : ping.content.question}</h3></div></div><span className={`status ${ping.status}`}>{expired && ping.status === "active" ? "expired" : ping.status}</span></header>
+    <header><div className="ping-heading"><span className="glyph-frame"><PingGlyph type={ping.type} /></span><div><span className="type-chip">{typeLabel[ping.type]}</span><h3>{ping.type === "message" ? ping.content.message : ping.type === "nomination" ? ping.content.prompt : ping.content.question}</h3></div></div><span className={`status ${ping.status}`}>{deadlinePassed && ping.status === "active" ? "ended" : ping.status}</span></header>
     <p className="byline">From {ping.sender.name} · {new Date(ping.createdAt).toLocaleString()}</p>
     {ping.type === "message" && ping.content.replyTo && <p className="reply-reference">In reply to: “{ping.content.replyTo.excerpt}”</p>}
-    {ping.expiresAt && ping.status === "active" && <div className="timer" aria-live="polite">{expired ? "Time ended" : `${formatDuration(ping.expiresAt - now)} remaining`}</div>}
+    {ping.type !== "message" && ping.status === "active" && <div className="timer" aria-live="polite">{deadlinePassed ? "Deadline reached" : `${formatDuration(ping.deadlineAt - now)} remaining`}</div>}
+    <p className="deletion-time">Deletes {new Date(ping.expiresAt).toLocaleString()}</p>
     {renderResponse()}
     {error && <div className="notice error" role="alert">{error}</div>}
     <div className="results">{renderResults()}</div>

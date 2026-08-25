@@ -26,7 +26,7 @@ export default function App() {
   const [prefill, setPrefill] = useState<MessagePrefill | null>(null);
   const [now, setNow] = useState(Date.now());
   useEffect(() => { const timer = window.setInterval(() => setNow(Date.now()), 1000); return () => window.clearInterval(timer); }, []);
-  const waiting = useMemo(() => waitingPings(room.pings, room.responses, room.currentPlayer.id, now).sort((a, b) => (a.expiresAt ?? Infinity) - (b.expiresAt ?? Infinity) || a.createdAt - b.createdAt), [room.pings, room.responses, room.currentPlayer.id, now]);
+  const waiting = useMemo(() => waitingPings(room.pings, room.responses, room.currentPlayer.id, now).sort((a, b) => (a.type === "message" ? a.expiresAt : a.deadlineAt) - (b.type === "message" ? b.expiresAt : b.deadlineAt) || a.createdAt - b.createdAt), [room.pings, room.responses, room.currentPlayer.id, now]);
   const waitingIds = useMemo(() => new Set(waiting.map((ping) => ping.id)), [waiting]);
   const recent = useMemo(() => room.pings.filter((ping) => !waitingIds.has(ping.id) && (ping.sender.id === room.currentPlayer.id || isRecipient(ping, room.currentPlayer.id) || room.responses.some((response) => response.pingId === ping.id && response.playerId === room.currentPlayer.id) || room.role === "GM")).sort((a, b) => b.createdAt - a.createdAt), [room.pings, room.responses, room.currentPlayer.id, room.role, waitingIds]);
   const openReply = (next: MessagePrefill) => { setPrefill(next); setView("create"); };
