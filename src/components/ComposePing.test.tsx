@@ -85,4 +85,16 @@ describe("ComposePing", () => {
     fireEvent.click(screen.getByRole("button", { name: "Remove option 9" }));
     expect(send.disabled).toBe(false);
   });
+
+  it("saves a Message locally without requiring recipients", () => {
+    localStorage.clear();
+    render(<ComposePing role="PLAYER" currentPlayer={player} players={[gm, player]} settings={{ ...DEFAULT_SETTINGS, allowPlayerCatalogs: true }} metadata={{}} onCreated={() => undefined} />);
+    fireEvent.change(screen.getByLabelText("Message"), { target: { value: "Saved clue" } });
+    fireEvent.click(screen.getByRole("checkbox", { name: "Save to catalog" }));
+    fireEvent.change(screen.getByLabelText("Catalog"), { target: { value: "Clues" } });
+    const save = screen.getByRole("button", { name: "Save Message" }) as HTMLButtonElement;
+    expect(save.disabled).toBe(false);
+    fireEvent.click(save);
+    expect(JSON.parse(localStorage.getItem("com.ex-asperis.obr-ping/catalogs") ?? "[]")[0].name).toBe("Clues");
+  });
 });

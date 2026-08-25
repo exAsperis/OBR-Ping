@@ -25,6 +25,8 @@ export interface RoomSettings {
   allowedTypes: Record<PingType, boolean>;
   defaultDeadlineMinutes: number;
   defaultExpiryMinutes: number;
+  allowPlayerCatalogs: boolean;
+  allowPlayerSessions: boolean;
 }
 
 export const DEFAULT_SETTINGS: RoomSettings = {
@@ -33,7 +35,18 @@ export const DEFAULT_SETTINGS: RoomSettings = {
   allowedTypes: { quiz: false, vote: false, nomination: false, message: false },
   defaultDeadlineMinutes: DEFAULT_DEADLINE_MS / 60_000,
   defaultExpiryMinutes: DEFAULT_EXPIRY_MS / 60_000,
+  allowPlayerCatalogs: true,
+  allowPlayerSessions: false,
 };
+
+export interface SessionScore { playerId: string; playerName: string; score: number; correctTimeMs: number }
+export interface PingSession {
+  id: string;
+  host: Participant;
+  index: number;
+  total: number;
+  scores?: SessionScore[];
+}
 
 interface BasePing {
   schemaVersion: 1;
@@ -47,6 +60,7 @@ interface BasePing {
   status: PingStatus;
   completedAt?: number;
   cancelledAt?: number;
+  session?: PingSession;
 }
 
 export interface QuizPing extends BasePing {
@@ -74,6 +88,7 @@ export interface NominationPing extends BasePing {
 
 export interface MessagePing extends BasePing {
   type: "message";
+  deadlineAt: number;
   content: {
     message: string;
     allowReply: boolean;
@@ -118,6 +133,8 @@ const isParticipant = (value: unknown): value is Participant => isObject(value) 
 const isOption = (value: unknown): value is Option => isObject(value) && isString(value.id) && isString(value.label) && value.label.length > 0 && value.label.length <= 100;
 const isStringArray = (value: unknown): value is string[] => Array.isArray(value) && value.every(isString);
 const validOptions = (value: unknown) => Array.isArray(value) && value.length >= 2 && value.length <= 8 && value.every(isOption) && new Set(value.map((item) => item.id)).size === value.length;
+const isSessionScore = (value: unknown): value is SessionScore => isObject(value) && isString(value.playerId) && isString(value.playerName) && isFiniteNumber(value.score) && value.score >= 0 && isFiniteNumber(value.correctTimeMs) && value.correctTimeMs >= 0;
+const isPingSession = (value: unknown): value is PingSession => isObject(value) && isString(value.id) && isParticipant(value.host) && Number.isSafeInteger(value.index) && Number(value.index) >= 0 && Number.isSafeInteger(value.total) && Number(value.total) > Number(value.index) && (value.scores === undefined || Array.isArray(value.scores) && value.scores.every(isSessionScore));
 
 export function parseSettings(value: unknown): RoomSettings {
   if (!isObject(value) || value.schemaVersion !== SCHEMA_VERSION || typeof value.allowPlayers !== "boolean" || !isObject(value.allowedTypes)) return DEFAULT_SETTINGS;
@@ -125,17 +142,17 @@ export function parseSettings(value: unknown): RoomSettings {
   if (["quiz", "vote", "nomination", "message"].some((type) => typeof allowedTypes[type] !== "boolean")) return DEFAULT_SETTINGS;
   const defaultDeadlineMinutes = isFiniteNumber(value.defaultDeadlineMinutes) && Number.isSafeInteger(value.defaultDeadlineMinutes) && value.defaultDeadlineMinutes > 0 ? value.defaultDeadlineMinutes : DEFAULT_SETTINGS.defaultDeadlineMinutes;
   const defaultExpiryMinutes = isFiniteNumber(value.defaultExpiryMinutes) && Number.isSafeInteger(value.defaultExpiryMinutes) && value.defaultExpiryMinutes > defaultDeadlineMinutes ? value.defaultExpiryMinutes : Math.max(DEFAULT_SETTINGS.defaultExpiryMinutes, defaultDeadlineMinutes + 1);
-  return { ...value, defaultDeadlineMinutes, defaultExpiryMinutes } as unknown as RoomSettings;
+  return { ...value, defaultDeadlineMinutes, defaultExpiryMinutes, allowPlayerCatalogs: typeof value.allowPlayerCatalogs === "boolean" ? value.allowPlayerCatalogs : true, allowPlayerSessions: typeof value.allowPlayerSessions === "boolean" ? value.allowPlayerSessions : false } as unknown as RoomSettings;
 }
 
 export function parsePing(value: unknown): PingRecord | null {
-  if (!isObject(value) || value.schemaVersion !== SCHEMA_VERSION || !isString(value.id) || !["quiz", "vote", "nomination", "message"].includes(String(value.type)) || !isParticipant(value.sender) || !Array.isArray(value.recipients) || !value.recipients.every(isParticipant) || (value.recipients.length === 0 && value.includeFutureRecipients !== true) || (value.includeFutureRecipients !== undefined && typeof value.includeFutureRecipients !== "boolean") || !isFiniteNumber(value.createdAt) || !["active", "completed", "cancelled"].includes(String(value.status)) || !isObject(value.content)) return null;
+  if (!isObject(value) || value.schemaVersion !== SCHEMA_VERSION || !isString(value.id) || !["quiz", "vote", "nomination", "message"].includes(String(value.type)) || !isParticipant(value.sender) || !Array.isArray(value.recipients) || !value.recipients.every(isParticipant) || (value.recipients.length === 0 && value.includeFutureRecipients !== true) || (value.includeFutureRecipients !== undefined && typeof value.includeFutureRecipients !== "boolean") || !isFiniteNumber(value.createdAt) || !["active", "completed", "cancelled"].includes(String(value.status)) || !isObject(value.content) || (value.session !== undefined && !isPingSession(value.session))) return null;
   const legacy = value.deadlineAt === undefined;
   let expiresAt: number;
   let deadlineAt: number | undefined;
   if (value.type === "message") {
-    if (value.deadlineAt !== undefined) return null;
     expiresAt = value.expiresAt === undefined ? value.createdAt + DEFAULT_EXPIRY_MS : value.expiresAt as number;
+    deadlineAt = legacy ? Math.min(value.createdAt + DEFAULT_DEADLINE_MS, expiresAt - 1) : value.deadlineAt as number;
   } else if (legacy) {
     deadlineAt = value.expiresAt === undefined ? value.createdAt + DEFAULT_DEADLINE_MS : value.expiresAt as number;
     expiresAt = deadlineAt + DEFAULT_EXPIRY_MS;
@@ -192,10 +209,10 @@ export const pingKey = (pingId: string) => `${PING_PREFIX}${pingId}`;
 export const responseKey = (pingId: string, playerId: string) => `${RESPONSE_PREFIX}${pingId}/${encodeURIComponent(playerId)}`;
 export const responsesFor = (responses: PingResponse[], pingId: string) => responses.filter((response) => response.pingId === pingId);
 export const responseFor = (responses: PingResponse[], pingId: string, playerId: string) => responses.find((response) => response.pingId === pingId && response.playerId === playerId);
-export const isRecipient = (ping: PingRecord, playerId: string, now = Date.now()) => ping.recipients.some((recipient) => recipient.id === playerId) || Boolean(ping.includeFutureRecipients && ping.sender.id !== playerId && ping.status === "active" && now < (ping.type === "message" ? ping.expiresAt : ping.deadlineAt));
+export const isRecipient = (ping: PingRecord, playerId: string, now = Date.now()) => ping.recipients.some((recipient) => recipient.id === playerId) || Boolean(ping.includeFutureRecipients && ping.sender.id !== playerId && ping.status === "active" && now < ping.deadlineAt);
 export const canCreate = (role: "GM" | "PLAYER", type: PingType, settings: RoomSettings) => role === "GM" || (settings.allowPlayers && settings.allowedTypes[type]);
 export const canManage = (ping: PingRecord, playerId: string, role: "GM" | "PLAYER") => role === "GM" || ping.sender.id === playerId;
-export const isPastDeadline = (ping: PingRecord, now = Date.now()) => ping.type !== "message" && ping.status === "active" && now >= ping.deadlineAt;
+export const isPastDeadline = (ping: PingRecord, now = Date.now()) => ping.status === "active" && now >= ping.deadlineAt;
 export const isDeletionDue = (ping: PingRecord, now = Date.now()) => now >= ping.expiresAt;
 
 export function isComplete(ping: PingRecord, responses: PingResponse[], now = Date.now()) {

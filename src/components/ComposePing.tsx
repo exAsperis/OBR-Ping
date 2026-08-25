@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { Metadata } from "@owlbear-rodeo/sdk";
 import { DEFAULT_DEADLINE_MS, DEFAULT_EXPIRY_MS, SCHEMA_VERSION, canCreate, excerpt, type MessagePing, type Option, type Participant, type PingRecord, type PingType, type RoomSettings } from "../domain";
 import { CapacityError, savePing } from "../storage";
+import { loadCatalogs, saveCatalogs, type CatalogItem } from "../catalog";
 import { PingGlyph } from "./PingGlyph";
 import { Toggle } from "./Toggle";
 
@@ -21,7 +22,14 @@ export interface VotePrefill {
   includeFutureRecipients?: boolean;
 }
 
-export type ComposePrefill = MessagePrefill | VotePrefill;
+export interface CatalogPrefill {
+  kind: "catalog";
+  mode: "edit" | "send" | "new";
+  catalogId?: string;
+  item: CatalogItem;
+}
+
+export type ComposePrefill = MessagePrefill | VotePrefill | CatalogPrefill;
 
 interface Props {
   role: "GM" | "PLAYER";
@@ -30,7 +38,7 @@ interface Props {
   settings: RoomSettings;
   metadata: Metadata;
   prefill?: ComposePrefill | null;
-  onCreated: () => void;
+  onCreated: (destination?: "catalogs") => void;
 }
 
 interface DraftOption { id: string; value: string }
@@ -68,20 +76,25 @@ function TimeEditor({ label, draft, defaultMs, onChange }: { label: string; draf
 export function ComposePing({ role, currentPlayer, players, settings, metadata, prefill, onCreated }: Props) {
   const messagePrefill = prefill?.kind === "message" ? prefill : null;
   const votePrefill = prefill?.kind === "vote" ? prefill : null;
-  const initialOptions = useRef<DraftOption[]>(votePrefill ? votePrefill.options.map((option) => ({ id: crypto.randomUUID(), value: option.label })) : [makeOption(), makeOption()]);
+  const catalogPrefill = prefill?.kind === "catalog" ? prefill : null;
+  const catalogItem = catalogPrefill?.item;
+  const prefillOptions = votePrefill?.options ?? (catalogItem?.type === "quiz" || catalogItem?.type === "vote" ? catalogItem.content.options : undefined);
+  const initialOptions = useRef<DraftOption[]>(prefillOptions ? prefillOptions.map((option) => ({ id: option.id || crypto.randomUUID(), value: option.label })) : [makeOption(), makeOption()]);
   const optionInputs = useRef(new Map<string, HTMLInputElement>());
   const available = useMemo(() => players.filter((player, index) => player.id !== currentPlayer.id && players.findIndex((candidate) => candidate.id === player.id) === index), [players, currentPlayer.id]);
-  const [type, setType] = useState<PingType>(votePrefill ? "vote" : "message");
-  const [recipients, setRecipients] = useState(() => new Set([...(prefill?.recipients.map((player) => player.id) ?? []), ...(votePrefill?.includeFutureRecipients ? [FUTURE_RECIPIENT_ID] : [])]));
-  const [prompt, setPrompt] = useState(votePrefill?.question ?? "");
-  const [mode, setMode] = useState<"single" | "multiple" | "ranked">("single");
+  const [type, setType] = useState<PingType>(catalogItem?.type ?? (votePrefill ? "vote" : "message"));
+  const [recipients, setRecipients] = useState(() => new Set([...(prefill && "recipients" in prefill ? prefill.recipients.map((player) => player.id) : []), ...(votePrefill?.includeFutureRecipients ? [FUTURE_RECIPIENT_ID] : [])]));
+  const [prompt, setPrompt] = useState(votePrefill?.question ?? (catalogItem ? catalogItem.type === "message" ? catalogItem.content.message : catalogItem.type === "nomination" ? catalogItem.content.prompt : catalogItem.content.question : ""));
+  const [mode, setMode] = useState<"single" | "multiple" | "ranked">(catalogItem?.type === "quiz" || catalogItem?.type === "vote" ? catalogItem.content.mode : "single");
   const [options, setOptions] = useState(initialOptions.current);
-  const [correct, setCorrect] = useState(() => new Set([initialOptions.current[0].id]));
+  const [correct, setCorrect] = useState(() => new Set(catalogItem?.type === "quiz" ? catalogItem.content.correctOptionIds : [initialOptions.current[0].id]));
   const [draggedOption, setDraggedOption] = useState<string | null>(null);
-  const [deadline, setDeadline] = useState<TimeDraft>(() => durationDraft(settings.defaultDeadlineMinutes));
-  const [expiry, setExpiry] = useState<TimeDraft>(() => durationDraft(settings.defaultExpiryMinutes));
-  const [allowReply, setAllowReply] = useState(true);
-  const [allowReplyAll, setAllowReplyAll] = useState(false);
+  const [deadline, setDeadline] = useState<TimeDraft>(() => durationDraft(catalogItem?.deadlineMinutes ?? settings.defaultDeadlineMinutes));
+  const [expiry, setExpiry] = useState<TimeDraft>(() => durationDraft(catalogItem?.expiryMinutes ?? settings.defaultExpiryMinutes));
+  const [allowReply, setAllowReply] = useState(catalogItem?.type === "message" ? catalogItem.content.allowReply : true);
+  const [allowReplyAll, setAllowReplyAll] = useState(catalogItem?.type === "message" ? catalogItem.content.allowReplyAll : false);
+  const [saveToCatalog, setSaveToCatalog] = useState(catalogPrefill?.mode === "edit");
+  const [catalogName, setCatalogName] = useState(() => catalogPrefill?.catalogId ? loadCatalogs().find((catalog) => catalog.id === catalogPrefill.catalogId)?.name ?? "" : "");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [now, setNow] = useState(Date.now());
@@ -91,9 +104,11 @@ export function ComposePing({ role, currentPlayer, players, settings, metadata, 
   const validOptions = options.filter((option) => option.value.trim());
   const optionsValid = type !== "quiz" && type !== "vote" || (validOptions.length >= 2 && validOptions.length <= 8 && validOptions.every((option) => option.value.trim().length <= 100) && (type !== "quiz" || validOptions.some((option) => correct.has(option.id))));
   const validationExpiry = resolveTime(expiry, now, "Automatic deletion").value;
-  const validationDeadline = type === "message" ? undefined : resolveTime(deadline, now, "Deadline").value;
-  const timingValid = validationExpiry !== undefined && (type === "message" || validationDeadline !== undefined && validationExpiry > validationDeadline);
-  const canSend = !submitting && canCreate(role, type, settings) && hasRecipients && Boolean(prompt.trim()) && optionsValid && timingValid;
+  const validationDeadline = resolveTime(deadline, now, "Deadline").value;
+  const timingValid = validationExpiry !== undefined && validationDeadline !== undefined && validationExpiry > validationDeadline;
+  const catalogSaving = saveToCatalog || catalogPrefill?.mode === "edit";
+  const canEditCatalogs = role === "GM" || settings.allowPlayerCatalogs;
+  const canSend = !submitting && (catalogSaving ? canEditCatalogs && Boolean(catalogName.trim()) : canCreate(role, type, settings) && hasRecipients) && Boolean(prompt.trim()) && optionsValid && timingValid;
 
   const selectType = (next: PingType) => {
     setType(next); setError(null); setMode("single");
@@ -123,19 +138,19 @@ export function ComposePing({ role, currentPlayer, players, settings, metadata, 
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault(); setError(null);
-    if (!canCreate(role, type, settings)) { setError(`You do not have permission to create a ${labels[type]}.`); return; }
+    if (catalogSaving ? !canEditCatalogs : !canCreate(role, type, settings)) { setError(catalogSaving ? "You do not have permission to edit catalogs." : `You do not have permission to create a ${labels[type]}.`); return; }
     const selected = available.filter((player) => recipients.has(player.id));
     const includeFutureRecipients = recipients.has(FUTURE_RECIPIENT_ID);
-    if (!selected.length && !includeFutureRecipients) { setError("Choose at least one recipient."); return; }
+    if (!catalogSaving && !selected.length && !includeFutureRecipients) { setError("Choose at least one recipient."); return; }
     const text = prompt.trim();
     if (!text) { setError(type === "message" ? "Enter a message." : "Enter a question or prompt."); return; }
     const createdAt = Date.now();
     const resolvedExpiry = resolveTime(expiry, createdAt, "Automatic deletion");
     if (resolvedExpiry.error || resolvedExpiry.value === undefined) { setError(resolvedExpiry.error ?? "Automatic deletion is required."); return; }
-    const resolvedDeadline = type === "message" ? undefined : resolveTime(deadline, createdAt, "Deadline");
-    if (resolvedDeadline?.error || (type !== "message" && resolvedDeadline?.value === undefined)) { setError(resolvedDeadline?.error ?? "A deadline is required."); return; }
+    const resolvedDeadline = resolveTime(deadline, createdAt, "Deadline");
+    if (resolvedDeadline.error || resolvedDeadline.value === undefined) { setError(resolvedDeadline.error ?? "A deadline is required."); return; }
     if (resolvedDeadline?.value !== undefined && resolvedExpiry.value <= resolvedDeadline.value) { setError("Automatic deletion must be later than the deadline."); return; }
-    const base = { schemaVersion: SCHEMA_VERSION, id: crypto.randomUUID(), sender: currentPlayer, recipients: selected, ...(includeFutureRecipients ? { includeFutureRecipients: true } : {}), createdAt, expiresAt: resolvedExpiry.value, status: "active" as const };
+    const base = { schemaVersion: SCHEMA_VERSION, id: crypto.randomUUID(), sender: currentPlayer, recipients: selected, ...(includeFutureRecipients ? { includeFutureRecipients: true } : {}), createdAt, deadlineAt: resolvedDeadline.value, expiresAt: resolvedExpiry.value, status: "active" as const };
     let ping: PingRecord;
     if (type === "message") {
       ping = { ...base, type, content: { message: text, allowReply, allowReplyAll, ...(messagePrefill ? { replyTo: { pingId: messagePrefill.source.id, excerpt: excerpt(messagePrefill.source.content.message) } } : {}) } };
@@ -152,6 +167,25 @@ export function ComposePing({ role, currentPlayer, players, settings, metadata, 
         ping = { ...base, deadlineAt: resolvedDeadline!.value!, type, content: { question: text, mode: mode === "multiple" ? "multiple" : "single", options: built, correctOptionIds } };
       } else ping = { ...base, deadlineAt: resolvedDeadline!.value!, type, content: { question: text, mode: mode === "ranked" ? "ranked" : "single", options: built } };
     }
+    if (catalogSaving) {
+      const deadlineMinutes = Math.ceil((resolvedDeadline.value - createdAt) / 60_000), expiryMinutes = Math.ceil((resolvedExpiry.value - createdAt) / 60_000);
+      const item = { schemaVersion: SCHEMA_VERSION, id: catalogItem?.id ?? crypto.randomUUID(), type: ping.type, content: ping.content, deadlineMinutes, expiryMinutes } as CatalogItem;
+      const catalogs = loadCatalogs();
+      const name = catalogName.trim();
+      const nameMatch = catalogs.find((catalog) => catalog.name.toLocaleLowerCase() === name.toLocaleLowerCase());
+      const target = catalogPrefill?.mode === "edit" ? catalogs.find((catalog) => catalog.id === catalogPrefill.catalogId) : nameMatch;
+      if (nameMatch && nameMatch.type !== type) { setError("That catalog contains a different Ping type."); return; }
+      const timestamp = Date.now();
+      if (target) {
+        if (target.type !== type) { setError("A catalog can contain only one Ping type."); return; }
+        target.items = catalogPrefill?.mode === "edit" ? target.items.some((existing) => existing.id === item.id) ? target.items.map((existing) => existing.id === item.id ? item : existing) : [...target.items, item] : [...target.items, item];
+        target.updatedAt = timestamp;
+      } else catalogs.push({ schemaVersion: SCHEMA_VERSION, id: crypto.randomUUID(), name, type, createdAt: timestamp, updatedAt: timestamp, items: [item] });
+      setSubmitting(true);
+      try { saveCatalogs(catalogs); onCreated("catalogs"); } catch (cause) { setError(cause instanceof Error ? cause.message : "Unable to save the catalog."); }
+      finally { setSubmitting(false); }
+      return;
+    }
     setSubmitting(true);
     try { await savePing(ping, metadata); onCreated(); }
     catch (cause) { setError(cause instanceof CapacityError ? `${cause.message} Ask the GM to clear room data.` : cause instanceof Error ? cause.message : "Unable to send this Ping."); }
@@ -159,12 +193,12 @@ export function ComposePing({ role, currentPlayer, players, settings, metadata, 
   };
 
   return <form className="stack" onSubmit={submit}>
-    {messagePrefill ? <div className="reply-compose-label"><PingGlyph type="message" />{messagePrefill.replyAll ? "Reply all" : "Reply"} to {messagePrefill.source.sender.name}</div> : <div className="segmented type-picker" aria-label="Ping type">{typeOrder.map((item) => <button key={item} type="button" className={`${type === item ? "active " : ""}type-${item}`} disabled={!canCreate(role, item, settings)} onClick={() => selectType(item)}><PingGlyph type={item} /><span>{labels[item]}</span></button>)}</div>}
+    {messagePrefill ? <div className="reply-compose-label"><PingGlyph type="message" />{messagePrefill.replyAll ? "Reply all" : "Reply"} to {messagePrefill.source.sender.name}</div> : <div className="segmented type-picker" aria-label="Ping type">{typeOrder.map((item) => <button key={item} type="button" className={`${type === item ? "active " : ""}type-${item}`} disabled={catalogPrefill?.mode === "edit" || (!saveToCatalog && !canCreate(role, item, settings))} onClick={() => selectType(item)}><PingGlyph type={item} /><span>{labels[item]}</span></button>)}</div>}
 
-    <section className="panel">
+    {!catalogSaving && <section className="panel">
       <div className="section-heading recipient-heading"><span className="eyebrow">Recipients</span><button type="button" className="text-button" onClick={() => setRecipients(new Set([...available.map((player) => player.id), FUTURE_RECIPIENT_ID]))}>Everyone</button></div>
       <div className="choice-list compact-choices"><Toggle plain checked={recipients.has(FUTURE_RECIPIENT_ID)} onChange={() => toggleRecipient(FUTURE_RECIPIENT_ID)} label={<span className="player-label"><span className="player-dot future" aria-hidden="true" />Players who join later <span className="info-tooltip" tabIndex={0} aria-label="Anyone who joins while this Ping is active will receive it." data-tooltip="Anyone who joins while this Ping is active will receive it." onClick={(event) => event.preventDefault()}>i</span></span>} />{available.map((player) => <Toggle plain key={player.id} checked={recipients.has(player.id)} onChange={() => toggleRecipient(player.id)} label={<span className="player-label"><span className="player-dot" style={player.color ? { backgroundColor: player.color } : undefined} aria-hidden="true" />{player.name}</span>} />)}</div>
-    </section>
+    </section>}
 
     <section className="panel stack compact">
       <label>{type === "message" ? "Message" : type === "nomination" ? "Prompt" : "Question"}<textarea maxLength={300} rows={3} value={prompt} onChange={(event) => setPrompt(event.target.value)} /></label>
@@ -174,10 +208,11 @@ export function ComposePing({ role, currentPlayer, players, settings, metadata, 
         <fieldset><legend>Options</legend><div className="stack compact">{options.map((option, index) => <div className={`option-editor${draggedOption === option.id ? " dragging" : ""}`} key={option.id} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); if (draggedOption) moveOption(draggedOption, index); setDraggedOption(null); }}><button type="button" className="drag-handle" draggable aria-label={`Reorder option ${index + 1}`} title="Drag to reorder" onDragStart={(event) => { event.dataTransfer.effectAllowed = "move"; setDraggedOption(option.id); }} onDragEnd={() => setDraggedOption(null)} onKeyDown={(event) => { if (event.key === "ArrowUp") { event.preventDefault(); moveOption(option.id, index - 1); } else if (event.key === "ArrowDown") { event.preventDefault(); moveOption(option.id, index + 1); } }}>⠿</button><input ref={(element) => { if (element) optionInputs.current.set(option.id, element); else optionInputs.current.delete(option.id); }} aria-label={`Option ${index + 1}`} maxLength={100} value={option.value} onChange={(event) => updateOption(option.id, event.target.value)} placeholder={`Option ${index + 1}`} />{type === "quiz" && (mode === "multiple" ? <Toggle compact label={`Option ${index + 1} is correct`} checked={correct.has(option.id)} onChange={() => toggleCorrect(option.id)} /> : <input aria-label={`Option ${index + 1} is correct`} type="radio" name="correct" checked={correct.has(option.id)} onChange={() => toggleCorrect(option.id)} />)}{options.length > 2 && <button aria-label={`Remove option ${index + 1}`} type="button" className="icon-button" onClick={() => removeOption(option.id)}>×</button>}</div>)}</div>{options.length < 8 && <button type="button" className="text-button add-option" onClick={addOption}>+ Add option</button>}</fieldset>
       </>}
       {type === "message" && <div className="stack compact"><div className="choice-list compact-choices"><Toggle plain checked={allowReply} onChange={setAllowReply} label="Allow reply" /><Toggle plain checked={allowReplyAll} onChange={(checked) => { setAllowReplyAll(checked); if (checked) setAllowReply(true); }} label="Allow reply all" /></div>{!playerRepliesEnabled && <div className="notice warning" role="status">Players cannot reply right now because player-created Messages are disabled in room settings. These options will still apply if the GM enables them later.</div>}</div>}
-      {type !== "message" && <TimeEditor label="Deadline" draft={deadline} defaultMs={DEFAULT_DEADLINE_MS} onChange={setDeadline} />}
+      <TimeEditor label="Deadline" draft={deadline} defaultMs={DEFAULT_DEADLINE_MS} onChange={setDeadline} />
       <TimeEditor label="Automatic deletion" draft={expiry} defaultMs={DEFAULT_EXPIRY_MS} onChange={setExpiry} />
+      {catalogPrefill?.mode !== "send" && <div className="catalog-save-controls"><Toggle checked={saveToCatalog} disabled={!canEditCatalogs || catalogPrefill?.mode === "edit"} onChange={setSaveToCatalog} label="Save to catalog" />{catalogSaving && <label>Catalog<input list="ping-catalogs" maxLength={80} value={catalogName} disabled={catalogPrefill?.mode === "edit"} onChange={(event) => setCatalogName(event.target.value)} /><datalist id="ping-catalogs">{loadCatalogs().filter((catalog) => catalog.type === type).map((catalog) => <option key={catalog.id} value={catalog.name} />)}</datalist></label>}</div>}
       {error && <div className="notice error" role="alert">{error}</div>}
-      <button className={`primary-button send-button type-${type}`} disabled={!canSend}>{submitting ? "Sending…" : `Send ${labels[type]}`}</button>
+      <button className={`primary-button send-button type-${type}`} disabled={!canSend}>{submitting ? catalogSaving ? "Saving…" : "Sending…" : `${catalogSaving ? "Save" : "Send"} ${labels[type]}`}</button>
     </section>
   </form>;
 }

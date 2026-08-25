@@ -5,6 +5,7 @@ import { removePing, removeResponse, savePing, saveResponse } from "../storage";
 import type { MessagePrefill, VotePrefill } from "./ComposePing";
 import { PingGlyph } from "./PingGlyph";
 import { Toggle } from "./Toggle";
+import { calculateSessionScores, rankScores } from "../session";
 
 interface Props {
   ping: PingRecord;
@@ -35,6 +36,7 @@ export function PingCard({ ping, responses, currentPlayer, role, settings, metad
   const nominations = relevant.filter((item): item is NominationResponse => item.type === "nomination").sort((a, b) => a.respondedAt - b.respondedAt);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [sessionResultsUntil] = useState(() => Date.now() + 5_000);
 
   const respond = async () => {
     setError(null);
@@ -126,7 +128,8 @@ export function PingCard({ ping, responses, currentPlayer, role, settings, metad
       const standings = quizStandings(ping, responses);
       const leaders = standings[0]?.correct ? standings.filter((standing) => standing.correct && standing.elapsedMs === standings[0].elapsedMs) : [];
       const tied = leaders.length > 1;
-      return <ol className="results-list">{standings.map((standing, index) => { const leader = leaders.includes(standing); return <li className={leader ? "winning-result" : ""} key={standing.player.id}><span>{leader && <i className={`winner-check${tied ? " tie" : ""}`} aria-label={tied ? "Tied winner" : "Winner"}>✓</i>}<strong>{index + 1}. {standing.player.name}</strong><small>{standing.answered ? standing.correct ? "Correct" : "Incorrect" : "No answer"}</small></span><span>{standing.elapsedMs !== undefined ? formatDuration(standing.elapsedMs) : "—"}</span></li>; })}</ol>;
+      const cumulative = ping.session?.scores ? rankScores(calculateSessionScores(ping.session.scores, ping, responses)) : [];
+      return <div className="stack compact"><ol className="results-list">{standings.map((standing, index) => { const leader = leaders.includes(standing); return <li className={leader ? "winning-result" : ""} key={standing.player.id}><span>{leader && <i className={`winner-check${tied ? " tie" : ""}`} aria-label={tied ? "Tied winner" : "Winner"}>✓</i>}<strong>{index + 1}. {standing.player.name}</strong><small>{standing.answered ? standing.correct ? "Correct" : "Incorrect" : "No answer"}</small></span><span>{standing.elapsedMs !== undefined ? formatDuration(standing.elapsedMs) : "—"}</span></li>; })}</ol>{cumulative.length > 0 && <div className="session-leaderboard"><strong>Cumulative leaderboard</strong><ol className="results-list">{cumulative.map((standing) => <li key={standing.playerId}><span>{standing.rank}. {standing.playerName}</span><strong>{standing.score}</strong></li>)}</ol></div>}</div>;
     }
     if (ping.type === "vote") {
       if (ping.content.mode === "single") {
@@ -143,12 +146,13 @@ export function PingCard({ ping, responses, currentPlayer, role, settings, metad
     return null;
   };
 
-  const replyAllowed = ping.type === "message" && recipient && ping.content.allowReply && canCreate(role, "message", settings);
+  const replyAllowed = ping.type === "message" && active && recipient && ping.content.allowReply && canCreate(role, "message", settings);
   return <article className={`ping-card ${ping.type}`}>
     <header><div className="ping-heading"><span className="glyph-frame"><PingGlyph type={ping.type} /></span><div><span className="type-chip">{typeLabel[ping.type]}</span><h3>{ping.type === "message" ? ping.content.message : ping.type === "nomination" ? ping.content.prompt : ping.content.question}</h3></div></div><span className={`status ${ping.status}`}>{deadlinePassed && ping.status === "active" ? "ended" : ping.status}</span></header>
     <p className="byline">From {ping.sender.name} · {new Date(ping.createdAt).toLocaleString()}</p>
+    {ping.session && <p className="session-position">Session Ping {ping.session.index + 1} of {ping.session.total}{ping.status === "completed" ? ` · Next Ping in ${Math.max(0, Math.ceil((sessionResultsUntil - now) / 1_000))}s` : ""}</p>}
     {ping.type === "message" && ping.content.replyTo && <p className="reply-reference">In reply to: “{ping.content.replyTo.excerpt}”</p>}
-    {ping.type !== "message" && ping.status === "active" && <div className="timer" aria-live="polite">{deadlinePassed ? "Deadline reached" : `${formatDuration(ping.deadlineAt - now)} remaining`}</div>}
+    {ping.status === "active" && <div className="timer" aria-live="polite">{deadlinePassed ? "Deadline reached" : `${formatDuration(ping.deadlineAt - now)} remaining`}</div>}
     {renderResponse()}
     {error && <div className="notice error" role="alert">{error}</div>}
     <div className="results">{renderResults()}</div>

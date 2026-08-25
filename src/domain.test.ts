@@ -97,7 +97,17 @@ describe("metadata accounting and replies", () => {
   });
 
   it("deduplicates Reply All and excludes the current player", () => {
-    const message: MessagePing = { schemaVersion: 1, id: "m", type: "message", sender: gm, recipients: [ada, ben, ada], createdAt: 1, expiresAt: 700_000, status: "active", content: { message: "Hi", allowReply: true, allowReplyAll: true } };
+    const message: MessagePing = { schemaVersion: 1, id: "m", type: "message", sender: gm, recipients: [ada, ben, ada], createdAt: 1, deadlineAt: 61_000, expiresAt: 700_000, status: "active", content: { message: "Hi", allowReply: true, allowReplyAll: true } };
     expect(replyRecipients(message, ada.id, true).map((item) => item.id)).toEqual(["gm", "ben"]);
+  });
+
+  it("migrates legacy Messages to the default five-minute deadline", () => {
+    const parsed = parsePing({ schemaVersion: 1, id: "legacy-message", type: "message", sender: gm, recipients: [ada], createdAt: 1_000, expiresAt: 700_000, status: "active", content: { message: "Hi", allowReply: false, allowReplyAll: false } });
+    expect(parsed?.deadlineAt).toBe(301_000);
+  });
+
+  it("defaults player catalog permissions for older settings", () => {
+    const legacy = { schemaVersion: 1, allowPlayers: false, allowedTypes: DEFAULT_SETTINGS.allowedTypes, defaultDeadlineMinutes: 5, defaultExpiryMinutes: 1440 };
+    expect(parseSettings(legacy)).toMatchObject({ allowPlayerCatalogs: true, allowPlayerSessions: false });
   });
 });

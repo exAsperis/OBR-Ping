@@ -22,7 +22,7 @@ export function lifecycleUpdate(metadata: Metadata, now = Date.now()) {
     if (ping.status === "active" && isComplete(ping, responses, now)) {
       const relevant = responsesFor(responses, ping.id);
       const allAnswered = !ping.includeFutureRecipients && ping.recipients.every((recipient) => relevant.some((response) => response.playerId === recipient.id));
-      const completedAt = allAnswered ? Math.max(ping.createdAt, ...relevant.map((response) => response.respondedAt)) : ping.type === "message" ? now : ping.deadlineAt;
+      const completedAt = allAnswered ? Math.max(ping.createdAt, ...relevant.map((response) => response.respondedAt)) : ping.deadlineAt;
       update[pingKey(ping.id)] = { ...ping, status: "completed", completedAt };
     }
   }

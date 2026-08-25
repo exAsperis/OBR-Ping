@@ -25,7 +25,7 @@ describe("PingCard", () => {
 
   it("offers Reply and Reply All before an unread Message is marked read", () => {
     const gm = { id: "gm", name: "GM" }, player = { id: "p", name: "Player" };
-    const ping: MessagePing = { schemaVersion: 1, id: "m", type: "message", sender: gm, recipients: [player], createdAt: 1, expiresAt: 1_000, status: "active", content: { message: "You hear footsteps.", allowReply: true, allowReplyAll: true } };
+    const ping: MessagePing = { schemaVersion: 1, id: "m", type: "message", sender: gm, recipients: [player], createdAt: 1, deadlineAt: 500, expiresAt: 1_000, status: "active", content: { message: "You hear footsteps.", allowReply: true, allowReplyAll: true } };
     const settings = { ...DEFAULT_SETTINGS, allowPlayers: true, allowedTypes: { ...DEFAULT_SETTINGS.allowedTypes, message: true } };
     render(<PingCard ping={ping} responses={[]} currentPlayer={player} role="PLAYER" settings={settings} metadata={{}} now={2} onReply={() => undefined} onRunoff={() => undefined} onChanged={() => undefined} />);
     expect(screen.getByRole("button", { name: "Mark as read" })).toBeTruthy();

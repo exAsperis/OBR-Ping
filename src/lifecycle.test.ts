@@ -3,7 +3,7 @@ import { SCHEMA_VERSION, pingKey, responseKey, type MessagePing, type PingRespon
 import { lifecycleUpdate } from "./lifecycle";
 
 const sender = { id: "gm", name: "GM" }, recipient = { id: "p", name: "Player" };
-const message: MessagePing = { schemaVersion: SCHEMA_VERSION, id: "m", type: "message", sender, recipients: [recipient], createdAt: 100, expiresAt: 1_000, status: "active", content: { message: "Listen", allowReply: false, allowReplyAll: false } };
+const message: MessagePing = { schemaVersion: SCHEMA_VERSION, id: "m", type: "message", sender, recipients: [recipient], createdAt: 100, deadlineAt: 600, expiresAt: 1_000, status: "active", content: { message: "Listen", allowReply: false, allowReplyAll: false } };
 
 describe("lifecycleUpdate", () => {
   it("completes when every recipient responds", () => {
@@ -23,5 +23,10 @@ describe("lifecycleUpdate", () => {
     const responseMetadataKey = responseKey(message.id, recipient.id);
     const update = lifecycleUpdate({ [pingKey(message.id)]: message, [responseMetadataKey]: response }, 1_000);
     expect(update).toMatchObject({ [pingKey(message.id)]: undefined, [responseMetadataKey]: undefined });
+  });
+
+  it("completes an unread Message at its deadline", () => {
+    const update = lifecycleUpdate({ [pingKey(message.id)]: message }, message.deadlineAt);
+    expect(update[pingKey(message.id)]).toMatchObject({ status: "completed", completedAt: message.deadlineAt });
   });
 });

@@ -8,3 +8,6 @@ export const PREFERENCE_KEY = `${EXTENSION_ID}/notification-preference`;
 export const SOUND_KEY = `${EXTENSION_ID}/notification-sound`;
 export const SEEN_KEY = `${EXTENSION_ID}/seen-pings`;
 export const NOTIFICATION_POPOVER_ID = `${EXTENSION_ID}/notification-popover`;
+export const CATALOGS_KEY = `${EXTENSION_ID}/catalogs`;
+export const HOST_SESSION_KEY = `${EXTENSION_ID}/host-session`;
+export const SESSION_LOCK_KEY = `${EXTENSION_ID}/session`;
