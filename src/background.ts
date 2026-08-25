@@ -5,13 +5,14 @@ import { NOTIFICATION_POPOVER_ID } from "./constants";
 import { getNotificationPreference, getSeenPings, getSoundEnabled, setSeenPings } from "./preferences";
 import { playPingSound } from "./sound";
 import { safeSetMetadata } from "./storage";
-import { progressHostSession, stopSession } from "./session";
+import { progressHostSession, readSessionLock, stopSession } from "./session";
 
 let processing = false;
 let initialized = false;
 let previousStatuses = new Map<string, PingRecord["status"]>();
 let previouslyRelevant = new Set<string>();
 let notificationPingId: string | null = null;
+const shownSessionResults = new Set<string>();
 
 function notificationUrl(pingId: string) {
   const url = new URL("extension.html", window.location.href);
@@ -53,13 +54,15 @@ async function synchronize(providedMetadata?: Awaited<ReturnType<typeof OBR.room
     const preference = getNotificationPreference();
     if (incoming.length) {
       if (getSoundEnabled()) await playPingSound();
-      if (preference === "popover") await openNotificationPopover(incoming[0].id);
+      if (incoming[0].session || preference === "popover") await openNotificationPopover(incoming[0].id);
       else if (preference === "auto-open") await OBR.action.open();
       else if (preference === "badge-toast") await OBR.notification.show(incoming.length === 1 ? `${incoming[0].sender.name} sent you a ${incoming[0].type}.` : `${incoming.length} new Pings are waiting.`, "INFO");
     }
-    const sessionCompleted = pings.filter((ping) => ping.session && ping.status === "completed" && (previousStatuses.get(ping.id) === "active" || !initialized && Date.now() - (ping.completedAt ?? 0) < 10_000) && (ping.sender.id === OBR.player.id || ping.recipients.some((recipient) => recipient.id === OBR.player.id)));
+    const sessionLock = readSessionLock(metadata);
+    const sessionCompleted = pings.filter((ping) => ping.session && ping.status === "completed" && !shownSessionResults.has(ping.id) && (previousStatuses.get(ping.id) === "active" || sessionLock?.id === ping.session.id && sessionLock.currentPingId === ping.id && sessionLock.phase === "results") && (ping.sender.id === OBR.player.id || ping.recipients.some((recipient) => recipient.id === OBR.player.id)));
     if (sessionCompleted.length) {
       const result = sessionCompleted[0];
+      shownSessionResults.add(result.id);
       await openNotificationPopover(result.id);
       window.setTimeout(() => { if (notificationPingId === result.id) { notificationPingId = null; void OBR.popover.close(NOTIFICATION_POPOVER_ID).catch(() => undefined); } }, 5_000);
     }

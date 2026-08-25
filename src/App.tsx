@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import OBR from "@owlbear-rodeo/sdk";
 import { METADATA_LIMIT_BYTES } from "./constants";
 import { NOTIFICATION_POPOVER_ID } from "./constants";
@@ -31,6 +31,7 @@ export default function App() {
   useAutoHeight(Boolean(focusedPingId));
   const [view, setView] = useState<View>("inbox");
   const [prefill, setPrefill] = useState<ComposePrefill | null>(null);
+  const acknowledgedBadgeIds = useRef(new Set<string>());
   const [now, setNow] = useState(Date.now());
   useEffect(() => { const timer = window.setInterval(() => setNow(Date.now()), 1000); return () => window.clearInterval(timer); }, []);
   const waiting = useMemo(() => waitingPings(room.pings, room.responses, room.currentPlayer.id, now).sort((a, b) => a.deadlineAt - b.deadlineAt || a.createdAt - b.createdAt), [room.pings, room.responses, room.currentPlayer.id, now]);
@@ -41,11 +42,12 @@ export default function App() {
   const changed = () => void room.refresh();
   const created = (destination?: "catalogs") => { setPrefill(null); setView(destination ?? "inbox"); changed(); };
   const closeNotificationPopover = () => OBR.onReady(() => { void OBR.popover.close(NOTIFICATION_POPOVER_ID).catch(() => undefined); });
+  const acknowledgeBadge = (pingId: string) => OBR.onReady(() => { acknowledgedBadgeIds.current.add(pingId); const remaining = waiting.filter((ping) => !acknowledgedBadgeIds.current.has(ping.id)).length; void OBR.action.setBadgeText(remaining ? (remaining > 99 ? "99+" : String(remaining)) : undefined); });
 
   if (room.status === "connecting") return <StatusPanel title="Connecting to Owlbear Rodeo" message="Loading room participants and waiting Pings…" />;
   if (room.status === "error") return <StatusPanel title="Ping is unavailable" message={room.error ?? "Unable to connect to the room."} onRetry={() => void room.refresh()} />;
 
-  const renderCards = (items: PingRecord[], empty: string, notification = false) => items.length ? <div className="stack">{items.map((ping) => <PingCard key={ping.id} ping={ping} responses={room.responses} currentPlayer={room.currentPlayer} role={room.role} settings={room.settings} metadata={room.metadata} now={now} onReply={openReply} onRunoff={openRunoff} onResponseSubmitted={notification ? closeNotificationPopover : undefined} onChanged={changed} />)}</div> : <section className="empty-state"><img src="/icon.svg" alt="" /><h2>All clear</h2><p>{empty}</p></section>;
+  const renderCards = (items: PingRecord[], empty: string, notification = false) => items.length ? <div className="stack">{items.map((ping) => <PingCard key={ping.id} ping={ping} responses={room.responses} currentPlayer={room.currentPlayer} role={room.role} settings={room.settings} metadata={room.metadata} now={now} onReply={openReply} onRunoff={openRunoff} onResponseSubmitted={() => { acknowledgeBadge(ping.id); if (notification) closeNotificationPopover(); }} onChanged={changed} />)}</div> : <section className="empty-state"><img src="/icon.svg" alt="" /><h2>All clear</h2><p>{empty}</p></section>;
 
   if (focusedPingId) {
     const focused = room.pings.find((ping) => ping.id === focusedPingId);
