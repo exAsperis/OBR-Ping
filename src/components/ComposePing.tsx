@@ -1,15 +1,27 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Metadata } from "@owlbear-rodeo/sdk";
-import { DEFAULT_DEADLINE_MS, DEFAULT_EXPIRY_MS, SCHEMA_VERSION, canCreate, excerpt, type MessagePing, type Participant, type PingRecord, type PingType, type RoomSettings } from "../domain";
+import { DEFAULT_DEADLINE_MS, DEFAULT_EXPIRY_MS, SCHEMA_VERSION, canCreate, excerpt, type MessagePing, type Option, type Participant, type PingRecord, type PingType, type RoomSettings } from "../domain";
 import { CapacityError, savePing } from "../storage";
 import { PingGlyph } from "./PingGlyph";
 import { Toggle } from "./Toggle";
 
 export interface MessagePrefill {
+  kind: "message";
   source: MessagePing;
   replyAll: boolean;
   recipients: Participant[];
 }
+
+export interface VotePrefill {
+  kind: "vote";
+  sourceId: string;
+  question: string;
+  options: Option[];
+  recipients: Participant[];
+  includeFutureRecipients?: boolean;
+}
+
+export type ComposePrefill = MessagePrefill | VotePrefill;
 
 interface Props {
   role: "GM" | "PLAYER";
@@ -17,7 +29,7 @@ interface Props {
   players: Participant[];
   settings: RoomSettings;
   metadata: Metadata;
-  prefill?: MessagePrefill | null;
+  prefill?: ComposePrefill | null;
   onCreated: () => void;
 }
 
@@ -54,12 +66,14 @@ function TimeEditor({ label, draft, defaultMs, onChange }: { label: string; draf
 }
 
 export function ComposePing({ role, currentPlayer, players, settings, metadata, prefill, onCreated }: Props) {
-  const initialOptions = useRef<DraftOption[]>([makeOption(), makeOption()]);
+  const messagePrefill = prefill?.kind === "message" ? prefill : null;
+  const votePrefill = prefill?.kind === "vote" ? prefill : null;
+  const initialOptions = useRef<DraftOption[]>(votePrefill ? votePrefill.options.map((option) => ({ id: crypto.randomUUID(), value: option.label })) : [makeOption(), makeOption()]);
   const optionInputs = useRef(new Map<string, HTMLInputElement>());
   const available = useMemo(() => players.filter((player, index) => player.id !== currentPlayer.id && players.findIndex((candidate) => candidate.id === player.id) === index), [players, currentPlayer.id]);
-  const [type, setType] = useState<PingType>("message");
-  const [recipients, setRecipients] = useState(() => new Set(prefill?.recipients.map((player) => player.id) ?? []));
-  const [prompt, setPrompt] = useState("");
+  const [type, setType] = useState<PingType>(votePrefill ? "vote" : "message");
+  const [recipients, setRecipients] = useState(() => new Set([...(prefill?.recipients.map((player) => player.id) ?? []), ...(votePrefill?.includeFutureRecipients ? [FUTURE_RECIPIENT_ID] : [])]));
+  const [prompt, setPrompt] = useState(votePrefill?.question ?? "");
   const [mode, setMode] = useState<"single" | "multiple" | "ranked">("single");
   const [options, setOptions] = useState(initialOptions.current);
   const [correct, setCorrect] = useState(() => new Set([initialOptions.current[0].id]));
@@ -124,7 +138,7 @@ export function ComposePing({ role, currentPlayer, players, settings, metadata, 
     const base = { schemaVersion: SCHEMA_VERSION, id: crypto.randomUUID(), sender: currentPlayer, recipients: selected, ...(includeFutureRecipients ? { includeFutureRecipients: true } : {}), createdAt, expiresAt: resolvedExpiry.value, status: "active" as const };
     let ping: PingRecord;
     if (type === "message") {
-      ping = { ...base, type, content: { message: text, allowReply, allowReplyAll, ...(prefill ? { replyTo: { pingId: prefill.source.id, excerpt: excerpt(prefill.source.content.message) } } : {}) } };
+      ping = { ...base, type, content: { message: text, allowReply, allowReplyAll, ...(messagePrefill ? { replyTo: { pingId: messagePrefill.source.id, excerpt: excerpt(messagePrefill.source.content.message) } } : {}) } };
     } else if (type === "nomination") {
       ping = { ...base, deadlineAt: resolvedDeadline!.value!, type, content: { prompt: text } };
     } else {
@@ -143,7 +157,7 @@ export function ComposePing({ role, currentPlayer, players, settings, metadata, 
   };
 
   return <form className="stack" onSubmit={submit}>
-    {prefill ? <div className="reply-compose-label"><PingGlyph type="message" />{prefill.replyAll ? "Reply all" : "Reply"} to {prefill.source.sender.name}</div> : <div className="segmented type-picker" aria-label="Ping type">{typeOrder.map((item) => <button key={item} type="button" className={`${type === item ? "active " : ""}type-${item}`} disabled={!canCreate(role, item, settings)} onClick={() => selectType(item)}><PingGlyph type={item} /><span>{labels[item]}</span></button>)}</div>}
+    {messagePrefill ? <div className="reply-compose-label"><PingGlyph type="message" />{messagePrefill.replyAll ? "Reply all" : "Reply"} to {messagePrefill.source.sender.name}</div> : <div className="segmented type-picker" aria-label="Ping type">{typeOrder.map((item) => <button key={item} type="button" className={`${type === item ? "active " : ""}type-${item}`} disabled={!canCreate(role, item, settings)} onClick={() => selectType(item)}><PingGlyph type={item} /><span>{labels[item]}</span></button>)}</div>}
 
     <section className="panel">
       <div className="section-heading recipient-heading"><span className="eyebrow">Recipients</span><button type="button" className="text-button" onClick={() => setRecipients(new Set([...available.map((player) => player.id), FUTURE_RECIPIENT_ID]))}>Everyone</button></div>

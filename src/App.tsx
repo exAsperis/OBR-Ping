@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { METADATA_LIMIT_BYTES } from "./constants";
 import { isRecipient, metadataBytes, waitingPings, type PingRecord } from "./domain";
 import { usePingRoom } from "./hooks/usePingRoom";
-import { ComposePing, type MessagePrefill } from "./components/ComposePing";
+import { ComposePing, type ComposePrefill, type MessagePrefill, type VotePrefill } from "./components/ComposePing";
 import { PingCard } from "./components/PingCard";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { StatusPanel } from "./components/StatusPanel";
@@ -23,20 +23,21 @@ export default function App() {
   const focusedPingId = new URLSearchParams(window.location.search).get("pingId");
   useAutoHeight(Boolean(focusedPingId));
   const [view, setView] = useState<View>("inbox");
-  const [prefill, setPrefill] = useState<MessagePrefill | null>(null);
+  const [prefill, setPrefill] = useState<ComposePrefill | null>(null);
   const [now, setNow] = useState(Date.now());
   useEffect(() => { const timer = window.setInterval(() => setNow(Date.now()), 1000); return () => window.clearInterval(timer); }, []);
   const waiting = useMemo(() => waitingPings(room.pings, room.responses, room.currentPlayer.id, now).sort((a, b) => (a.type === "message" ? a.expiresAt : a.deadlineAt) - (b.type === "message" ? b.expiresAt : b.deadlineAt) || a.createdAt - b.createdAt), [room.pings, room.responses, room.currentPlayer.id, now]);
   const waitingIds = useMemo(() => new Set(waiting.map((ping) => ping.id)), [waiting]);
   const recent = useMemo(() => room.pings.filter((ping) => !waitingIds.has(ping.id) && (ping.sender.id === room.currentPlayer.id || isRecipient(ping, room.currentPlayer.id) || room.responses.some((response) => response.pingId === ping.id && response.playerId === room.currentPlayer.id) || room.role === "GM")).sort((a, b) => b.createdAt - a.createdAt), [room.pings, room.responses, room.currentPlayer.id, room.role, waitingIds]);
   const openReply = (next: MessagePrefill) => { setPrefill(next); setView("create"); };
+  const openRunoff = (next: VotePrefill) => { setPrefill(next); setView("create"); };
   const changed = () => void room.refresh();
   const created = () => { setPrefill(null); setView("inbox"); changed(); };
 
   if (room.status === "connecting") return <StatusPanel title="Connecting to Owlbear Rodeo" message="Loading room participants and waiting Pings…" />;
   if (room.status === "error") return <StatusPanel title="Ping is unavailable" message={room.error ?? "Unable to connect to the room."} onRetry={() => void room.refresh()} />;
 
-  const renderCards = (items: PingRecord[], empty: string) => items.length ? <div className="stack">{items.map((ping) => <PingCard key={ping.id} ping={ping} responses={room.responses} currentPlayer={room.currentPlayer} role={room.role} settings={room.settings} metadata={room.metadata} now={now} onReply={openReply} onChanged={changed} />)}</div> : <section className="empty-state"><img src="/icon.svg" alt="" /><h2>All clear</h2><p>{empty}</p></section>;
+  const renderCards = (items: PingRecord[], empty: string) => items.length ? <div className="stack">{items.map((ping) => <PingCard key={ping.id} ping={ping} responses={room.responses} currentPlayer={room.currentPlayer} role={room.role} settings={room.settings} metadata={room.metadata} now={now} onReply={openReply} onRunoff={openRunoff} onChanged={changed} />)}</div> : <section className="empty-state"><img src="/icon.svg" alt="" /><h2>All clear</h2><p>{empty}</p></section>;
 
   if (focusedPingId) {
     const focused = room.pings.find((ping) => ping.id === focusedPingId);
@@ -48,7 +49,7 @@ export default function App() {
     {metadataBytes(room.metadata) > METADATA_LIMIT_BYTES * .9 && <div className="notice warning" role="status">Room metadata is nearly full. Ask the GM to review storage.</div>}
     <div className="content">
       {view === "inbox" && <div className="stack inbox">{waiting.length ? renderCards(waiting, "") : <section className="all-clear" role="status"><span aria-hidden="true">✓</span><strong>All clear</strong><small>No unread or unanswered Pings.</small></section>}<details className="recent-section"><summary><span>Recent</span><i className="recent-disclosure" aria-hidden="true">▼ ▼ ▼</i><b>{recent.length}</b></summary><div className="recent-content">{recent.length ? renderCards(recent, "") : <p className="muted">Nothing has been sent or received yet.</p>}</div></details></div>}
-      {view === "create" && <ComposePing key={prefill ? `${prefill.source.id}-${prefill.replyAll}` : "new"} role={room.role} currentPlayer={room.currentPlayer} players={prefill ? [...room.players, ...prefill.recipients] : room.players} settings={room.settings} metadata={room.metadata} prefill={prefill} onCreated={created} />}
+      {view === "create" && <ComposePing key={prefill ? prefill.kind === "message" ? `${prefill.source.id}-${prefill.replyAll}` : `runoff-${prefill.sourceId}` : "new"} role={room.role} currentPlayer={room.currentPlayer} players={prefill ? [...room.players, ...prefill.recipients] : room.players} settings={room.settings} metadata={room.metadata} prefill={prefill} onCreated={created} />}
       {view === "settings" && <SettingsPanel role={room.role} settings={room.settings} pings={room.pings} metadata={room.metadata} onChanged={changed} />}
     </div>
   </main>;

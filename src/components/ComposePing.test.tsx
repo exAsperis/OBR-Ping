@@ -67,4 +67,13 @@ describe("ComposePing", () => {
     expect((screen.getByLabelText("Option 1") as HTMLInputElement).value).toBe("Second");
     expect((screen.getByLabelText("Option 2") as HTMLInputElement).value).toBe("First");
   });
+
+  it("prefills a runoff Vote with tied options and recipients", () => {
+    render(<ComposePing role="GM" currentPlayer={gm} players={[gm, player]} settings={DEFAULT_SETTINGS} metadata={{}} prefill={{ kind: "vote", sourceId: "v", question: "Camp where?", options: [{ id: "a", label: "Cave" }, { id: "b", label: "Road" }], recipients: [player] }} onCreated={() => undefined} />);
+    expect(screen.getByRole("button", { name: "Vote" }).classList.contains("active")).toBe(true);
+    expect((screen.getByLabelText("Question") as HTMLTextAreaElement).value).toBe("Camp where?");
+    expect((screen.getByLabelText("Option 1") as HTMLInputElement).value).toBe("Cave");
+    expect((screen.getByLabelText("Option 2") as HTMLInputElement).value).toBe("Road");
+    expect((screen.getByRole("checkbox", { name: "Player" }) as HTMLInputElement).checked).toBe(true);
+  });
 });

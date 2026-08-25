@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { Metadata } from "@owlbear-rodeo/sdk";
 import { DEFAULT_DEADLINE_MS, DEFAULT_EXPIRY_MS, SCHEMA_VERSION, canCreate, canManage, formatDuration, instantRunoff, isPastDeadline, isRecipient, optionLabel, quizStandings, responseFor, responsesFor, voteTotals, type Participant, type PingRecord, type PingResponse, type RoomSettings } from "../domain";
 import { removePing, savePing, saveResponse } from "../storage";
-import type { MessagePrefill } from "./ComposePing";
+import type { MessagePrefill, VotePrefill } from "./ComposePing";
 import { PingGlyph } from "./PingGlyph";
 import { Toggle } from "./Toggle";
 
@@ -15,12 +15,13 @@ interface Props {
   metadata: Metadata;
   now: number;
   onReply: (prefill: MessagePrefill) => void;
+  onRunoff: (prefill: VotePrefill) => void;
   onChanged: () => void;
 }
 
 const typeLabel = { quiz: "Quiz", vote: "Vote", nomination: "Nomination", message: "Message" } as const;
 
-export function PingCard({ ping, responses, currentPlayer, role, settings, metadata, now, onReply, onChanged }: Props) {
+export function PingCard({ ping, responses, currentPlayer, role, settings, metadata, now, onReply, onRunoff, onChanged }: Props) {
   const existing = responseFor(responses, ping.id, currentPlayer.id);
   const relevant = responsesFor(responses, ping.id);
   const manager = canManage(ping, currentPlayer.id, role);
@@ -82,7 +83,7 @@ export function PingCard({ ping, responses, currentPlayer, role, settings, metad
 
   const startReply = async (replyAll: boolean) => {
     if (ping.type !== "message") return;
-    const prefill: MessagePrefill = { source: ping, replyAll, recipients: (replyAll ? [ping.sender, ...ping.recipients] : [ping.sender]).filter((player, index, all) => player.id !== currentPlayer.id && all.findIndex((candidate) => candidate.id === player.id) === index) };
+    const prefill: MessagePrefill = { kind: "message", source: ping, replyAll, recipients: (replyAll ? [ping.sender, ...ping.recipients] : [ping.sender]).filter((player, index, all) => player.id !== currentPlayer.id && all.findIndex((candidate) => candidate.id === player.id) === index) };
     if (existing) { onReply(prefill); return; }
     setBusy(true); setError(null);
     const readResponse: PingResponse = { schemaVersion: SCHEMA_VERSION, pingId: ping.id, playerId: currentPlayer.id, playerName: currentPlayer.name, respondedAt: Date.now(), type: "message", read: true };
@@ -108,15 +109,31 @@ export function PingCard({ ping, responses, currentPlayer, role, settings, metad
 
   const renderResults = () => {
     if (ping.status === "cancelled") return <div className="notice">This Ping was cancelled.</div>;
+    if (ping.type === "message") {
+      const reads = relevant.filter((response) => response.type === "message").length;
+      return <p className="muted">Read by {reads}/{Math.max(ping.recipients.length, reads)}</p>;
+    }
     if (ping.status !== "completed" && !deadlinePassed) return <p className="muted">{ping.includeFutureRecipients ? `${relevant.length} responses` : `${relevant.length} of ${ping.recipients.length} responded`}</p>;
-    if (ping.type === "quiz") return <ol className="results-list">{quizStandings(ping, responses).map((standing, index) => <li key={standing.player.id}><span><strong>{index + 1}. {standing.player.name}</strong><small>{standing.answered ? standing.correct ? "Correct" : "Incorrect" : "No answer"}</small></span><span>{standing.elapsedMs !== undefined ? formatDuration(standing.elapsedMs) : "—"}</span></li>)}</ol>;
+    if (ping.type === "quiz") {
+      const standings = quizStandings(ping, responses);
+      const leaders = standings[0]?.correct ? standings.filter((standing) => standing.correct && standing.elapsedMs === standings[0].elapsedMs) : [];
+      const tied = leaders.length > 1;
+      return <ol className="results-list">{standings.map((standing, index) => { const leader = leaders.includes(standing); return <li className={leader ? "winning-result" : ""} key={standing.player.id}><span>{leader && <i className={`winner-check${tied ? " tie" : ""}`} aria-label={tied ? "Tied winner" : "Winner"}>✓</i>}<strong>{index + 1}. {standing.player.name}</strong><small>{standing.answered ? standing.correct ? "Correct" : "Incorrect" : "No answer"}</small></span><span>{standing.elapsedMs !== undefined ? formatDuration(standing.elapsedMs) : "—"}</span></li>; })}</ol>;
+    }
     if (ping.type === "vote") {
-      if (ping.content.mode === "single") { const totals = voteTotals(ping, responses); return <ol className="results-list">{[...ping.content.options].sort((a, b) => totals[b.id] - totals[a.id]).map((option) => <li key={option.id}><span>{option.label}</span><strong>{totals[option.id]}</strong></li>)}</ol>; }
-      const rounds = instantRunoff(ping, responses); return <div className="stack compact">{rounds.map((round, index) => <div className="round" key={index}><strong>Round {index + 1}</strong>{ping.content.options.filter((option) => option.id in round.counts).map((option) => <div key={option.id}><span>{option.label}</span><span>{round.counts[option.id]}</span></div>)}<small>{round.winner ? `${optionLabel(ping, round.winner)} wins` : round.eliminated ? `${optionLabel(ping, round.eliminated)} eliminated` : ""}</small></div>)}</div>;
+      if (ping.content.mode === "single") {
+        const totals = voteTotals(ping, responses);
+        const sorted = [...ping.content.options].sort((a, b) => totals[b.id] - totals[a.id]);
+        const leaders = totals[sorted[0]?.id] > 0 ? sorted.filter((option) => totals[option.id] === totals[sorted[0].id]) : [];
+        const tied = leaders.length > 1;
+        return <div className="stack compact"><ol className="results-list">{sorted.map((option) => { const leader = leaders.includes(option); return <li className={leader ? "winning-result" : ""} key={option.id}><span>{leader && <i className={`winner-check${tied ? " tie" : ""}`} aria-label={tied ? "Tied winner" : "Winner"}>✓</i>}{option.label}</span><strong>{totals[option.id]}</strong></li>; })}</ol>{tied && manager && canCreate(role, "vote", settings) && <button className="primary-button runoff-button" onClick={() => onRunoff({ kind: "vote", sourceId: ping.id, question: ping.content.question, options: leaders, recipients: ping.recipients, includeFutureRecipients: ping.includeFutureRecipients })}>Runoff</button>}</div>;
+      }
+      const rounds = instantRunoff(ping, responses);
+      const winner = relevant.some((response) => response.type === "vote" && response.optionIds.length) ? rounds.at(-1)?.winner : undefined;
+      return <div className="stack compact">{winner && <div className="ranked-winner"><i className="winner-check" aria-label="Winner">✓</i><strong>{optionLabel(ping, winner)}</strong></div>}{rounds.map((round, index) => <div className="round" key={index}><strong>Round {index + 1}</strong>{ping.content.options.filter((option) => option.id in round.counts).map((option) => <div key={option.id}><span>{option.label}</span><span>{round.counts[option.id]}</span></div>)}<small>{round.winner ? `${optionLabel(ping, round.winner)} wins` : round.eliminated ? `${optionLabel(ping, round.eliminated)} eliminated` : ""}</small></div>)}</div>;
     }
     if (ping.type === "nomination") return manager ? <div className="stack compact"><p className="muted">Edit, combine, or remove responses before creating a separate Vote.</p>{curated.map((item, index) => <div className="curated-option-editor" key={index}><input maxLength={100} value={item} onChange={(event) => setCurated((previous) => previous.map((value, itemIndex) => itemIndex === index ? event.target.value : value))} /><button className="icon-button" aria-label="Remove nomination" onClick={() => setCurated((previous) => previous.filter((_, itemIndex) => itemIndex !== index))}>×</button></div>)}<div className="button-row"><button className="secondary-button" disabled={busy} onClick={() => void saveCuration()}>Save list</button><button className="primary-button" disabled={busy || !canCreate(role, "vote", settings)} onClick={() => void createVote()}>Create Vote</button></div></div> : <p className="muted">The sender is reviewing the nominations.</p>;
-    const reads = relevant.filter((response) => response.type === "message").length;
-    return <p className="muted">{ping.includeFutureRecipients ? `Read by ${reads} recipients.` : `Read by ${reads} of ${ping.recipients.length} recipients.`}</p>;
+    return null;
   };
 
   const replyAllowed = ping.type === "message" && recipient && ping.content.allowReply && canCreate(role, "message", settings);
@@ -125,11 +142,10 @@ export function PingCard({ ping, responses, currentPlayer, role, settings, metad
     <p className="byline">From {ping.sender.name} · {new Date(ping.createdAt).toLocaleString()}</p>
     {ping.type === "message" && ping.content.replyTo && <p className="reply-reference">In reply to: “{ping.content.replyTo.excerpt}”</p>}
     {ping.type !== "message" && ping.status === "active" && <div className="timer" aria-live="polite">{deadlinePassed ? "Deadline reached" : `${formatDuration(ping.deadlineAt - now)} remaining`}</div>}
-    <p className="deletion-time">Deletes {new Date(ping.expiresAt).toLocaleString()}</p>
     {renderResponse()}
     {error && <div className="notice error" role="alert">{error}</div>}
     <div className="results">{renderResults()}</div>
     {replyAllowed && ping.type === "message" && <div className="button-row"><button className="secondary-button" disabled={busy} onClick={() => void startReply(false)}>Reply</button>{ping.content.allowReplyAll && <button className="secondary-button" disabled={busy} onClick={() => void startReply(true)}>Reply all</button>}</div>}
-    {manager && <footer className="card-actions">{active && (ping.type === "vote" || ping.type === "nomination") && <button className="text-button" disabled={busy} onClick={() => void updateStatus("completed")}>End now</button>}{active && <button className="text-button danger" disabled={busy} onClick={() => void updateStatus("cancelled")}>Cancel</button>}{!active && <button className="text-button danger" disabled={busy} onClick={() => void deleteInteraction()}>Delete</button>}</footer>}
+    <footer className="card-actions"><span className="deletion-time">Deletes {new Date(ping.expiresAt).toLocaleString()}</span>{manager && <span className="card-action-buttons">{active && (ping.type === "vote" || ping.type === "nomination") && <button className="text-button" disabled={busy} onClick={() => void updateStatus("completed")}>End now</button>}{active && <button className="text-button danger" disabled={busy} onClick={() => void updateStatus("cancelled")}>Cancel</button>}{!active && <button className="text-button danger" disabled={busy} onClick={() => void deleteInteraction()}>Delete</button>}</span>}</footer>
   </article>;
 }
