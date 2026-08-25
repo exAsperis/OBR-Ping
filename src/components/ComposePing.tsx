@@ -89,7 +89,7 @@ export function ComposePing({ role, currentPlayer, players, settings, metadata, 
   const playerRepliesEnabled = settings.allowPlayers && settings.allowedTypes.message;
   const hasRecipients = recipients.has(FUTURE_RECIPIENT_ID) || available.some((player) => recipients.has(player.id));
   const validOptions = options.filter((option) => option.value.trim());
-  const optionsValid = type !== "quiz" && type !== "vote" || (validOptions.length >= 2 && (type !== "quiz" || validOptions.some((option) => correct.has(option.id))));
+  const optionsValid = type !== "quiz" && type !== "vote" || (validOptions.length >= 2 && validOptions.length <= 8 && validOptions.every((option) => option.value.trim().length <= 100) && (type !== "quiz" || validOptions.some((option) => correct.has(option.id))));
   const validationExpiry = resolveTime(expiry, now, "Automatic deletion").value;
   const validationDeadline = type === "message" ? undefined : resolveTime(deadline, now, "Deadline").value;
   const timingValid = validationExpiry !== undefined && (type === "message" || validationDeadline !== undefined && validationExpiry > validationDeadline);
@@ -144,6 +144,8 @@ export function ComposePing({ role, currentPlayer, players, settings, metadata, 
     } else {
       const built = options.map((option) => ({ id: option.id, label: option.value.trim() })).filter((option) => option.label);
       if (built.length < 2) { setError("Provide at least two non-empty options."); return; }
+      if (built.length > 8) { setError("Use no more than eight options."); return; }
+      if (built.some((option) => option.label.length > 100)) { setError("Keep every option to 100 characters or fewer."); return; }
       if (type === "quiz") {
         const correctOptionIds = built.filter((option) => correct.has(option.id)).map((option) => option.id);
         if (!correctOptionIds.length) { setError("Choose at least one correct answer."); return; }

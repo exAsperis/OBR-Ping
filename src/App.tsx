@@ -40,11 +40,11 @@ export default function App() {
   if (room.status === "connecting") return <StatusPanel title="Connecting to Owlbear Rodeo" message="Loading room participants and waiting Pings…" />;
   if (room.status === "error") return <StatusPanel title="Ping is unavailable" message={room.error ?? "Unable to connect to the room."} onRetry={() => void room.refresh()} />;
 
-  const renderCards = (items: PingRecord[], empty: string, notification = false) => items.length ? <div className="stack">{items.map((ping) => <PingCard key={ping.id} ping={ping} responses={room.responses} currentPlayer={room.currentPlayer} role={room.role} settings={room.settings} metadata={room.metadata} now={now} onReply={openReply} onRunoff={openRunoff} onMessageRead={notification ? closeNotificationPopover : undefined} onChanged={changed} />)}</div> : <section className="empty-state"><img src="/icon.svg" alt="" /><h2>All clear</h2><p>{empty}</p></section>;
+  const renderCards = (items: PingRecord[], empty: string, notification = false) => items.length ? <div className="stack">{items.map((ping) => <PingCard key={ping.id} ping={ping} responses={room.responses} currentPlayer={room.currentPlayer} role={room.role} settings={room.settings} metadata={room.metadata} now={now} onReply={openReply} onRunoff={openRunoff} onResponseSubmitted={notification ? closeNotificationPopover : undefined} onChanged={changed} />)}</div> : <section className="empty-state"><img src="/icon.svg" alt="" /><h2>All clear</h2><p>{empty}</p></section>;
 
   if (focusedPingId) {
     const focused = room.pings.find((ping) => ping.id === focusedPingId);
-    return <main className={`app-shell notification-shell${focused ? ` type-${focused.type}` : ""}`}><header className="app-header"><div className="brand-lockup"><img src="/icon.svg" alt="" /><h1>{focused?.status === "completed" && (focused.type === "quiz" || focused.type === "vote") ? "Results" : "New Ping"}</h1></div></header><div className="content">{focused ? renderCards([focused], "This Ping is no longer available.", true) : <StatusPanel title="Ping unavailable" message="This Ping may have been deleted." />}</div></main>;
+    return <main className={`app-shell notification-shell${focused ? ` type-${focused.type}` : ""}`}><header className="app-header"><div className="brand-lockup"><img src="/icon.svg" alt="" /><h1>{focused?.status === "completed" && focused.type !== "message" ? "Results" : "New Ping"}</h1></div></header><div className="content">{focused ? renderCards([focused], "This Ping is no longer available.", true) : <StatusPanel title="Ping unavailable" message="This Ping may have been deleted." />}</div></main>;
   }
 
   return <main className="app-shell">

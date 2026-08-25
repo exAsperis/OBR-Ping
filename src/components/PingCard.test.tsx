@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
-import { DEFAULT_SETTINGS, type MessagePing, type PingResponse, type VotePing } from "../domain";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { DEFAULT_SETTINGS, type MessagePing, type NominationPing, type PingResponse, type VotePing } from "../domain";
 import { PingCard } from "./PingCard";
 
 afterEach(cleanup);
@@ -41,5 +41,23 @@ describe("PingCard", () => {
     render(<PingCard ping={ping} responses={responses} currentPlayer={player} role="PLAYER" settings={DEFAULT_SETTINGS} metadata={{}} now={4} onReply={() => undefined} onRunoff={() => undefined} onChanged={() => undefined} />);
     expect(screen.getByText("Results")).toBeTruthy();
     expect(screen.queryByText("Response received")).toBeNull();
+  });
+
+  it("shows attributed nominations and deduplicates Vote options", () => {
+    const gm = { id: "gm", name: "GM" }, ada = { id: "ada", name: "Ada" }, ben = { id: "ben", name: "Ben" };
+    const ping: NominationPing = { schemaVersion: 1, id: "n", type: "nomination", sender: gm, recipients: [ada, ben], createdAt: 1, deadlineAt: 100, expiresAt: 1_000, status: "completed", completedAt: 101, content: { prompt: "Choose a guide" } };
+    const responses: PingResponse[] = [
+      { schemaVersion: 1, pingId: "n", playerId: "ada", playerName: "Ada", respondedAt: 2, type: "nomination", value: "  Rowan  " },
+      { schemaVersion: 1, pingId: "n", playerId: "ben", playerName: "Ben", respondedAt: 3, type: "nomination", value: "rowan" },
+      { schemaVersion: 1, pingId: "n", playerId: "cy", playerName: "Cy", respondedAt: 4, type: "nomination", value: "Morgan" },
+    ];
+    let prefill: Parameters<React.ComponentProps<typeof PingCard>["onRunoff"]>[0] | undefined;
+    render(<PingCard ping={ping} responses={responses} currentPlayer={gm} role="GM" settings={DEFAULT_SETTINGS} metadata={{}} now={102} onReply={() => undefined} onRunoff={(value) => { prefill = value; }} onChanged={() => undefined} />);
+    expect(screen.getByText("Nominated by Ada")).toBeTruthy();
+    expect(screen.getByText("Nominated by Ben")).toBeTruthy();
+    expect(screen.getByText("Nominated by Cy")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Save list" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Create Vote" }));
+    expect(prefill?.options.map((option) => option.label)).toEqual(["Rowan", "Morgan"]);
   });
 });

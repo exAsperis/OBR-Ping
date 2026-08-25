@@ -19,6 +19,7 @@ export async function safeSetMetadata(update: Record<string, unknown>, current?:
 export const saveSettings = (settings: RoomSettings, current?: Metadata) => safeSetMetadata({ [SETTINGS_KEY]: settings }, current);
 export const savePing = (ping: PingRecord, current?: Metadata) => safeSetMetadata({ [pingKey(ping.id)]: ping }, current);
 export const saveResponse = (response: PingResponse, current?: Metadata) => safeSetMetadata({ [responseKey(response.pingId, response.playerId)]: response }, current);
+export const removeResponse = (pingId: string, playerId: string, current?: Metadata) => safeSetMetadata({ [responseKey(pingId, playerId)]: undefined }, current);
 
 export async function removePing(pingId: string, metadata?: Metadata) {
   const current = metadata ?? await OBR.room.getMetadata();

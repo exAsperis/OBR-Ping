@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useState } from "react";
+import { useState } from "react";
 import type { Metadata } from "@owlbear-rodeo/sdk";
-import { DEFAULT_DEADLINE_MS, DEFAULT_EXPIRY_MS, SCHEMA_VERSION, canCreate, canManage, formatDuration, instantRunoff, isPastDeadline, isRecipient, optionLabel, quizStandings, responseFor, responsesFor, voteTotals, type Participant, type PingRecord, type PingResponse, type RoomSettings } from "../domain";
-import { removePing, savePing, saveResponse } from "../storage";
+import { SCHEMA_VERSION, canCreate, canManage, formatDuration, instantRunoff, isPastDeadline, isRecipient, optionLabel, quizStandings, responseFor, responsesFor, voteTotals, type NominationResponse, type Participant, type PingRecord, type PingResponse, type RoomSettings } from "../domain";
+import { removePing, removeResponse, savePing, saveResponse } from "../storage";
 import type { MessagePrefill, VotePrefill } from "./ComposePing";
 import { PingGlyph } from "./PingGlyph";
 import { Toggle } from "./Toggle";
@@ -16,25 +16,23 @@ interface Props {
   now: number;
   onReply: (prefill: MessagePrefill) => void;
   onRunoff: (prefill: VotePrefill) => void;
-  onMessageRead?: () => void;
+  onResponseSubmitted?: () => void;
   onChanged: () => void;
 }
 
 const typeLabel = { quiz: "Quiz", vote: "Vote", nomination: "Nomination", message: "Message" } as const;
 
-export function PingCard({ ping, responses, currentPlayer, role, settings, metadata, now, onReply, onRunoff, onMessageRead, onChanged }: Props) {
+export function PingCard({ ping, responses, currentPlayer, role, settings, metadata, now, onReply, onRunoff, onResponseSubmitted, onChanged }: Props) {
   const existing = responseFor(responses, ping.id, currentPlayer.id);
   const relevant = responsesFor(responses, ping.id);
   const manager = canManage(ping, currentPlayer.id, role);
+  const sender = ping.sender.id === currentPlayer.id;
   const recipient = isRecipient(ping, currentPlayer.id);
   const deadlinePassed = isPastDeadline(ping, now);
   const active = ping.status === "active" && !deadlinePassed;
   const [selected, setSelected] = useState<string[]>(ping.type === "vote" && ping.content.mode === "ranked" ? ping.content.options.map((option) => option.id) : []);
   const [nomination, setNomination] = useState("");
-  const initialCurated = useMemo(() => ping.type === "nomination" ? ping.content.curated ?? relevant.filter((item) => item.type === "nomination").map((item) => item.value) : [], [ping, relevant]);
-  const [curated, setCurated] = useState(initialCurated);
-  const nominationSeed = ping.type === "nomination" ? (ping.content.curated ?? relevant.filter((item) => item.type === "nomination").map((item) => item.value)).join("\u0000") : "";
-  useEffect(() => { if (ping.type === "nomination" && ping.status !== "active") setCurated(nominationSeed ? nominationSeed.split("\u0000") : []); }, [nominationSeed, ping.status, ping.type]);
+  const nominations = relevant.filter((item): item is NominationResponse => item.type === "nomination").sort((a, b) => a.respondedAt - b.respondedAt);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -53,7 +51,7 @@ export function PingCard({ ping, responses, currentPlayer, role, settings, metad
       if (!value || /[\r\n]/.test(value)) { setError("Enter one single-line nomination."); return; }
       response = { schemaVersion: SCHEMA_VERSION, pingId: ping.id, playerId: currentPlayer.id, playerName: currentPlayer.name, respondedAt: Date.now(), type: "nomination", value };
     } else response = { schemaVersion: SCHEMA_VERSION, pingId: ping.id, playerId: currentPlayer.id, playerName: currentPlayer.name, respondedAt: Date.now(), type: "message", read: true };
-    setBusy(true); try { await saveResponse(response, metadata); onChanged(); if (ping.type === "message") onMessageRead?.(); } catch (cause) { setError(cause instanceof Error ? cause.message : "Unable to save your response."); } finally { setBusy(false); }
+    setBusy(true); try { await saveResponse(response, metadata); onChanged(); onResponseSubmitted?.(); } catch (cause) { setError(cause instanceof Error ? cause.message : "Unable to save your response."); } finally { setBusy(false); }
   };
 
   const updateStatus = async (status: "completed" | "cancelled") => {
@@ -67,19 +65,25 @@ export function PingCard({ ping, responses, currentPlayer, role, settings, metad
     setBusy(true); try { await removePing(ping.id, metadata); onChanged(); } catch (cause) { setError(cause instanceof Error ? cause.message : "Unable to delete this Ping."); } finally { setBusy(false); }
   };
 
-  const saveCuration = async () => {
+  const rescindNomination = async () => {
     if (ping.type !== "nomination") return;
-    const cleaned = curated.map((item) => item.trim()).filter(Boolean).slice(0, 8);
-    setBusy(true); try { await savePing({ ...ping, content: { ...ping.content, curated: cleaned } }, metadata); setCurated(cleaned); onChanged(); } catch (cause) { setError(cause instanceof Error ? cause.message : "Unable to save nominations."); } finally { setBusy(false); }
+    setBusy(true); setError(null);
+    try { await removeResponse(ping.id, currentPlayer.id, metadata); setNomination(""); onChanged(); }
+    catch (cause) { setError(cause instanceof Error ? cause.message : "Unable to rescind your nomination."); }
+    finally { setBusy(false); }
   };
 
-  const createVote = async () => {
+  const createVote = () => {
     if (ping.type !== "nomination") return;
-    const cleaned = curated.map((item) => item.trim()).filter(Boolean).slice(0, 8);
-    if (cleaned.length < 2) { setError("Keep at least two nominations to create a Vote."); return; }
-    const createdAt = Date.now();
-    const vote: PingRecord = { schemaVersion: SCHEMA_VERSION, id: crypto.randomUUID(), type: "vote", sender: currentPlayer, recipients: ping.recipients, ...(ping.includeFutureRecipients ? { includeFutureRecipients: true } : {}), createdAt, deadlineAt: createdAt + DEFAULT_DEADLINE_MS, expiresAt: createdAt + DEFAULT_EXPIRY_MS, status: "active", content: { question: ping.content.prompt, mode: "single", options: cleaned.map((label) => ({ id: crypto.randomUUID(), label })) } };
-    setBusy(true); try { await savePing(vote, metadata); onChanged(); } catch (cause) { setError(cause instanceof Error ? cause.message : "Unable to create the Vote."); } finally { setBusy(false); }
+    const unique = new Map<string, string>();
+    for (const response of nominations) {
+      const label = response.value.trim();
+      const key = label.toLocaleLowerCase();
+      if (label && !unique.has(key)) unique.set(key, label);
+    }
+    const options = [...unique.values()].map((label) => ({ id: crypto.randomUUID(), label }));
+    if (options.length < 2) { setError("At least two distinct nominations are required to create a Vote."); return; }
+    onRunoff({ kind: "vote", sourceId: ping.id, question: ping.content.prompt, options, recipients: ping.recipients, includeFutureRecipients: ping.includeFutureRecipients });
   };
 
   const startReply = async (replyAll: boolean) => {
@@ -98,7 +102,7 @@ export function PingCard({ ping, responses, currentPlayer, role, settings, metad
 
   const renderResponse = () => {
     if (!recipient) return null;
-    if (existing) return <div className="notice success" role="status">{ping.type === "message" ? "Read" : ping.status === "completed" || deadlinePassed ? "Results" : "Response received"}</div>;
+    if (existing) return <div className="stack compact"><div className="notice success" role="status">{ping.type === "message" ? "Read" : ping.status === "completed" || deadlinePassed || ping.type === "nomination" || ping.type === "quiz" || ping.type === "vote" ? "Results" : "Response received"}</div>{ping.type === "nomination" && active && <button className="secondary-button" disabled={busy} onClick={() => void rescindNomination()}>Rescind nomination</button>}</div>;
     if (!active) return null;
     if (ping.type === "message") return <button className="primary-button" disabled={busy} onClick={() => void respond()}>Mark as read</button>;
     if (ping.type === "nomination") return <div className="stack compact"><label>Your nomination<input maxLength={160} value={nomination} onChange={(event) => setNomination(event.target.value.replace(/[\r\n]/g, ""))} /></label><span className="counter">{nomination.length}/160</span><button className="primary-button" disabled={busy} onClick={() => void respond()}>Submit nomination</button></div>;
@@ -113,6 +117,9 @@ export function PingCard({ ping, responses, currentPlayer, role, settings, metad
     if (ping.type === "message") {
       const reads = relevant.filter((response) => response.type === "message").length;
       return <p className="muted">Read by {reads}/{Math.max(ping.recipients.length, reads)}</p>;
+    }
+    if (ping.type === "nomination") {
+      return <div className="stack compact">{nominations.length ? <ol className="results-list nomination-list">{nominations.map((response) => <li key={response.playerId}><span>{response.value}</span><small>Nominated by {response.playerName}</small></li>)}</ol> : <p className="muted">No nominations received.</p>}{sender && (ping.status === "completed" || deadlinePassed) && <button className="primary-button" disabled={busy || !canCreate(role, "vote", settings)} onClick={createVote}>Create Vote</button>}</div>;
     }
     if (ping.status !== "completed" && !deadlinePassed) return <p className="muted">{ping.includeFutureRecipients ? `${relevant.length} responses` : `${relevant.length} of ${ping.recipients.length} responded`}</p>;
     if (ping.type === "quiz") {
@@ -133,7 +140,6 @@ export function PingCard({ ping, responses, currentPlayer, role, settings, metad
       const winner = relevant.some((response) => response.type === "vote" && response.optionIds.length) ? rounds.at(-1)?.winner : undefined;
       return <div className="stack compact">{winner && <div className="ranked-winner"><i className="winner-check" aria-label="Winner">✓</i><strong>{optionLabel(ping, winner)}</strong></div>}{rounds.map((round, index) => <div className="round" key={index}><strong>Round {index + 1}</strong>{ping.content.options.filter((option) => option.id in round.counts).map((option) => <div key={option.id}><span>{option.label}</span><span>{round.counts[option.id]}</span></div>)}<small>{round.winner ? `${optionLabel(ping, round.winner)} wins` : round.eliminated ? `${optionLabel(ping, round.eliminated)} eliminated` : ""}</small></div>)}</div>;
     }
-    if (ping.type === "nomination") return manager ? <div className="stack compact"><p className="muted">Edit, combine, or remove responses before creating a separate Vote.</p>{curated.map((item, index) => <div className="curated-option-editor" key={index}><input maxLength={100} value={item} onChange={(event) => setCurated((previous) => previous.map((value, itemIndex) => itemIndex === index ? event.target.value : value))} /><button className="icon-button" aria-label="Remove nomination" onClick={() => setCurated((previous) => previous.filter((_, itemIndex) => itemIndex !== index))}>×</button></div>)}<div className="button-row"><button className="secondary-button" disabled={busy} onClick={() => void saveCuration()}>Save list</button><button className="primary-button" disabled={busy || !canCreate(role, "vote", settings)} onClick={() => void createVote()}>Create Vote</button></div></div> : <p className="muted">The sender is reviewing the nominations.</p>;
     return null;
   };
 

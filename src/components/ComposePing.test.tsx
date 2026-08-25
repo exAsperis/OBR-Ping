@@ -76,4 +76,13 @@ describe("ComposePing", () => {
     expect((screen.getByLabelText("Option 2") as HTMLInputElement).value).toBe("Road");
     expect((screen.getByRole("checkbox", { name: "Player" }) as HTMLInputElement).checked).toBe(true);
   });
+
+  it("requires an oversized Vote prefill to be trimmed to eight options", () => {
+    const options = Array.from({ length: 9 }, (_, index) => ({ id: String(index), label: `Choice ${index + 1}` }));
+    render(<ComposePing role="GM" currentPlayer={gm} players={[gm, player]} settings={DEFAULT_SETTINGS} metadata={{}} prefill={{ kind: "vote", sourceId: "n", question: "Choose", options, recipients: [player] }} onCreated={() => undefined} />);
+    const send = screen.getByRole("button", { name: "Send Vote" }) as HTMLButtonElement;
+    expect(send.disabled).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Remove option 9" }));
+    expect(send.disabled).toBe(false);
+  });
 });

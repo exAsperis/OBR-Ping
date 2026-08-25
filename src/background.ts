@@ -54,9 +54,10 @@ async function synchronize(providedMetadata?: Awaited<ReturnType<typeof OBR.room
       else if (preference === "auto-open") await OBR.action.open();
       else if (preference === "badge-toast") await OBR.notification.show(incoming.length === 1 ? `${incoming[0].sender.name} sent you a ${incoming[0].type}.` : `${incoming.length} new Pings are waiting.`, "INFO");
     }
-    const completed = initialized ? pings.filter((ping) => (ping.type === "quiz" || ping.type === "vote") && ping.status === "completed" && previousStatuses.get(ping.id) === "active" && (ping.sender.id === OBR.player.id || ping.recipients.some((recipient) => recipient.id === OBR.player.id) || Boolean(responseFor(responses, ping.id, OBR.player.id)) || previouslyRelevant.has(ping.id) || relevantBeforeCompletion.has(ping.id))) : [];
+    const completed = initialized ? pings.filter((ping) => (ping.type === "quiz" || ping.type === "vote" || ping.type === "nomination") && ping.status === "completed" && previousStatuses.get(ping.id) === "active" && (ping.type === "nomination" ? ping.sender.id === OBR.player.id : ping.sender.id === OBR.player.id || ping.recipients.some((recipient) => recipient.id === OBR.player.id) || Boolean(responseFor(responses, ping.id, OBR.player.id)) || previouslyRelevant.has(ping.id) || relevantBeforeCompletion.has(ping.id))) : [];
     if (completed.length && preference === "popover") await openNotificationPopover(completed[0].id);
-    else if (completed.length && preference === "badge-toast") await OBR.notification.show(`${completed[0].type === "quiz" ? "Quiz" : "Vote"} results are ready.`, "INFO");
+    else if (completed.length && preference === "auto-open") await OBR.action.open();
+    else if (completed.length && preference === "badge-toast") await OBR.notification.show(`${completed[0].type === "quiz" ? "Quiz" : completed[0].type === "vote" ? "Vote" : "Nomination"} results are ready.`, "INFO");
     for (const ping of waiting) seen.add(ping.id);
     setSeenPings(seen);
     previousStatuses = new Map(pings.map((ping) => [ping.id, ping.status]));
