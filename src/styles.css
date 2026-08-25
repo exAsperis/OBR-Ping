@@ -41,9 +41,10 @@ h3 { font-size: 1rem; margin-bottom: .35rem; line-height: 1.35; }
 .ping-glyph { width: 1.15rem; height: 1.15rem; flex: 0 0 auto; }
 .reply-compose-label { display: flex; align-items: center; gap: .45rem; padding: .1rem .15rem; color: var(--muted); font-size: .78rem; font-weight: 850; }
 label, legend { font-size: .78rem; font-weight: 800; color: var(--muted); }
-input[type="text"], input[type="datetime-local"], input:not([type]), textarea, select { width: 100%; margin-top: .35rem; border: 1px solid var(--border); border-radius: 10px; background: color-mix(in srgb, var(--paper) 92%, var(--text) 8%); color: var(--text); padding: .7rem; }
+input[type="text"], input[type="number"], input[type="datetime-local"], input:not([type]), textarea, select { width: 100%; margin-top: .35rem; border: 1px solid var(--border); border-radius: 10px; background: color-mix(in srgb, var(--paper) 92%, var(--text) 8%); color: var(--text); padding: .7rem; }
 input[type="datetime-local"] { min-height: 3rem; }
 input[type="datetime-local"]::-webkit-calendar-picker-indicator { width: 1.55rem; height: 1.55rem; padding: .15rem; cursor: pointer; opacity: .9; }
+.expiration-editor { display: flex; flex-direction: column; gap: .55rem; }.expiration-method { grid-template-columns: 1fr 1fr; }.duration-inputs { display: grid; grid-template-columns: repeat(3, 1fr); gap: .55rem; }.duration-inputs input { min-width: 0; }
 textarea { resize: vertical; min-height: 5rem; line-height: 1.45; }
 fieldset { border: 0; margin: 0; padding: 0; } legend { margin-bottom: .4rem; }
 .counter { align-self: flex-end; margin-top: -.45rem; color: var(--muted); font-size: .68rem; }

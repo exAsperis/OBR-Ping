@@ -18,6 +18,10 @@ describe("ComposePing", () => {
     fireEvent.click(screen.getByRole("button", { name: "Quiz" }));
     expect((screen.getByLabelText("Question") as HTMLTextAreaElement).maxLength).toBe(300);
     expect(screen.getByText("Options")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "From time of sending" }).classList.contains("active")).toBe(true);
+    expect((screen.getByLabelText("Minutes") as HTMLInputElement).value).toBe("1");
+    fireEvent.click(screen.getByRole("button", { name: "Specific date/time" }));
+    expect(screen.getByLabelText("Expiration date and time")).toBeTruthy();
   });
 
   it("disables all creation types for a player under default settings", () => {

@@ -22,6 +22,7 @@ interface Props {
 }
 
 interface DraftOption { id: string; value: string }
+type ExpirationMethod = "relative" | "specific";
 const makeOption = (): DraftOption => ({ id: crypto.randomUUID(), value: "" });
 const typeOrder: PingType[] = ["message", "vote", "quiz", "nomination"];
 const labels: Record<PingType, string> = { quiz: "Quiz", vote: "Vote", nomination: "Nomination", message: "Message" };
@@ -43,17 +44,25 @@ export function ComposePing({ role, currentPlayer, players, settings, metadata, 
   const [options, setOptions] = useState(initialOptions.current);
   const [correct, setCorrect] = useState(() => new Set([initialOptions.current[0].id]));
   const [draggedOption, setDraggedOption] = useState<string | null>(null);
-  const [expiresAt, setExpiresAt] = useState("");
+  const [expirationMethod, setExpirationMethod] = useState<ExpirationMethod>("relative");
+  const [expirationDays, setExpirationDays] = useState("");
+  const [expirationHours, setExpirationHours] = useState("");
+  const [expirationMinutes, setExpirationMinutes] = useState("");
+  const [specificExpiration, setSpecificExpiration] = useState("");
   const [allowReply, setAllowReply] = useState(true);
   const [allowReplyAll, setAllowReplyAll] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const playerRepliesEnabled = settings.allowPlayers && settings.allowedTypes.message;
+  const hasRelativeExpiration = [expirationDays, expirationHours, expirationMinutes].some((value) => value !== "" && Number(value) !== 0);
 
   const selectType = (next: PingType) => {
     setType(next); setError(null); setMode("single");
     setCorrect((previous) => new Set([previous.values().next().value ?? options[0].id]));
-    if (next === "quiz" && !expiresAt) setExpiresAt(localDateTime(Date.now() + 60_000));
+    if (next === "quiz") {
+      if (expirationMethod === "relative" && !hasRelativeExpiration) setExpirationMinutes("1");
+      if (expirationMethod === "specific" && !specificExpiration) setSpecificExpiration(localDateTime(Date.now() + 60_000));
+    }
   };
   const toggleRecipient = (id: string) => setRecipients((previous) => { const next = new Set(previous); next.has(id) ? next.delete(id) : next.add(id); return next; });
   const updateOption = (id: string, value: string) => setOptions((previous) => previous.map((option) => option.id === id ? { ...option, value } : option));
@@ -85,10 +94,15 @@ export function ComposePing({ role, currentPlayer, players, settings, metadata, 
     if (!selected.length && !includeFutureRecipients) { setError("Choose at least one recipient."); return; }
     const text = prompt.trim();
     if (!text) { setError(type === "message" ? "Enter a message." : "Enter a question or prompt."); return; }
-    const deadline = expiresAt ? new Date(expiresAt).getTime() : undefined;
-    if (deadline !== undefined && (!Number.isFinite(deadline) || deadline <= Date.now())) { setError("The deadline must be in the future."); return; }
+    const createdAt = Date.now();
+    const durationParts = [expirationDays, expirationHours, expirationMinutes].map((value) => value === "" ? 0 : Number(value));
+    if (expirationMethod === "relative" && (durationParts.some((value) => !Number.isSafeInteger(value) || value < 0) || durationParts[1] > 23 || durationParts[2] > 59)) { setError("Use whole non-negative numbers, with hours up to 23 and minutes up to 59."); return; }
+    const durationMs = ((durationParts[0] * 24 + durationParts[1]) * 60 + durationParts[2]) * 60_000;
+    if (expirationMethod === "relative" && !Number.isSafeInteger(durationMs)) { setError("That duration is too large."); return; }
+    const deadline = expirationMethod === "relative" ? durationMs > 0 ? createdAt + durationMs : undefined : specificExpiration ? new Date(specificExpiration).getTime() : undefined;
+    if (deadline !== undefined && (!Number.isFinite(deadline) || deadline <= createdAt)) { setError("The deadline must be in the future."); return; }
     if (type === "quiz" && deadline === undefined) { setError("A Quiz requires a deadline."); return; }
-    const base = { schemaVersion: SCHEMA_VERSION, id: crypto.randomUUID(), sender: currentPlayer, recipients: selected, ...(includeFutureRecipients ? { includeFutureRecipients: true } : {}), createdAt: Date.now(), expiresAt: deadline, status: "active" as const };
+    const base = { schemaVersion: SCHEMA_VERSION, id: crypto.randomUUID(), sender: currentPlayer, recipients: selected, ...(includeFutureRecipients ? { includeFutureRecipients: true } : {}), createdAt, expiresAt: deadline, status: "active" as const };
     let ping: PingRecord;
     if (type === "message") {
       ping = { ...base, type, content: { message: text, allowReply, allowReplyAll, ...(prefill ? { replyTo: { pingId: prefill.source.id, excerpt: excerpt(prefill.source.content.message) } } : {}) } };
@@ -125,7 +139,7 @@ export function ComposePing({ role, currentPlayer, players, settings, metadata, 
         <fieldset><legend>Options</legend><div className="stack compact">{options.map((option, index) => <div className={`option-editor${draggedOption === option.id ? " dragging" : ""}`} key={option.id} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); if (draggedOption) moveOption(draggedOption, index); setDraggedOption(null); }}><button type="button" className="drag-handle" draggable aria-label={`Reorder option ${index + 1}`} title="Drag to reorder" onDragStart={(event) => { event.dataTransfer.effectAllowed = "move"; setDraggedOption(option.id); }} onDragEnd={() => setDraggedOption(null)} onKeyDown={(event) => { if (event.key === "ArrowUp") { event.preventDefault(); moveOption(option.id, index - 1); } else if (event.key === "ArrowDown") { event.preventDefault(); moveOption(option.id, index + 1); } }}>⠿</button><input ref={(element) => { if (element) optionInputs.current.set(option.id, element); else optionInputs.current.delete(option.id); }} aria-label={`Option ${index + 1}`} maxLength={100} value={option.value} onChange={(event) => updateOption(option.id, event.target.value)} placeholder={`Option ${index + 1}`} />{type === "quiz" && (mode === "multiple" ? <Toggle compact label={`Option ${index + 1} is correct`} checked={correct.has(option.id)} onChange={() => toggleCorrect(option.id)} /> : <input aria-label={`Option ${index + 1} is correct`} type="radio" name="correct" checked={correct.has(option.id)} onChange={() => toggleCorrect(option.id)} />)}{options.length > 2 && <button aria-label={`Remove option ${index + 1}`} type="button" className="icon-button" onClick={() => removeOption(option.id)}>×</button>}</div>)}</div>{options.length < 8 && <button type="button" className="text-button add-option" onClick={addOption}>+ Add option</button>}</fieldset>
       </>}
       {type === "message" && <div className="stack compact"><div className="choice-list"><Toggle checked={allowReply} onChange={setAllowReply} label="Allow reply" description="Recipients may send a new Message back to the sender." /><Toggle checked={allowReplyAll} onChange={(checked) => { setAllowReplyAll(checked); if (checked) setAllowReply(true); }} label="Allow reply all" description="Recipients may send a new Message to the original participants." /></div>{!playerRepliesEnabled && <div className="notice warning" role="status">Players cannot reply right now because player-created Messages are disabled in room settings. These options will still apply if the GM enables them later.</div>}</div>}
-      <label>{type === "quiz" ? "Deadline" : type === "message" ? "Expiration (optional)" : "Deadline (optional)"}<input type="datetime-local" required={type === "quiz"} value={expiresAt} onChange={(event) => setExpiresAt(event.target.value)} /></label>
+      <fieldset className="expiration-editor"><legend>{type === "quiz" ? "Deadline" : type === "message" ? "Expiration (optional)" : "Deadline (optional)"}</legend><div className="segmented small expiration-method" aria-label="Expiration method"><button type="button" className={expirationMethod === "relative" ? "active" : ""} onClick={() => setExpirationMethod("relative")}>From time of sending</button><button type="button" className={expirationMethod === "specific" ? "active" : ""} onClick={() => setExpirationMethod("specific")}>Specific date/time</button></div>{expirationMethod === "relative" ? <div className="duration-inputs"><label>Days<input type="number" min="0" step="1" inputMode="numeric" value={expirationDays} onChange={(event) => setExpirationDays(event.target.value)} /></label><label>Hours<input type="number" min="0" max="23" step="1" inputMode="numeric" value={expirationHours} onChange={(event) => setExpirationHours(event.target.value)} /></label><label>Minutes<input type="number" min="0" max="59" step="1" inputMode="numeric" value={expirationMinutes} onChange={(event) => setExpirationMinutes(event.target.value)} /></label></div> : <label>Expiration date and time<input type="datetime-local" required={type === "quiz"} value={specificExpiration} onChange={(event) => setSpecificExpiration(event.target.value)} /></label>}<p className="muted">{expirationMethod === "relative" ? "The duration starts when the Ping is sent." : "Uses your device’s local date and time."}</p></fieldset>
       {error && <div className="notice error" role="alert">{error}</div>}
       <button className="primary-button" disabled={submitting || !canCreate(role, type, settings)}>{submitting ? "Sending…" : `Send ${labels[type]}`}</button>
     </section>
