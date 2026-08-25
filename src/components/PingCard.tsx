@@ -19,11 +19,13 @@ interface Props {
   onRunoff: (prefill: VotePrefill) => void;
   onResponseSubmitted?: () => void;
   onChanged: () => void;
+  shared?: boolean;
+  onDeleteLocal?: () => Promise<void>;
 }
 
 const typeLabel = { quiz: "Quiz", vote: "Vote", nomination: "Nomination", message: "Message" } as const;
 
-export function PingCard({ ping, responses, currentPlayer, role, settings, metadata, now, onReply, onRunoff, onResponseSubmitted, onChanged }: Props) {
+export function PingCard({ ping, responses, currentPlayer, role, settings, metadata, now, onReply, onRunoff, onResponseSubmitted, onChanged, shared = true, onDeleteLocal }: Props) {
   const existing = responseFor(responses, ping.id, currentPlayer.id);
   const relevant = responsesFor(responses, ping.id);
   const manager = canManage(ping, currentPlayer.id, role);
@@ -64,7 +66,7 @@ export function PingCard({ ping, responses, currentPlayer, role, settings, metad
 
   const deleteInteraction = async () => {
     if (!window.confirm("Delete this Ping and all of its responses? This cannot be undone.")) return;
-    setBusy(true); try { await removePing(ping.id, metadata); onChanged(); } catch (cause) { setError(cause instanceof Error ? cause.message : "Unable to delete this Ping."); } finally { setBusy(false); }
+    setBusy(true); try { if (shared) await removePing(ping.id, metadata); else await onDeleteLocal?.(); onChanged(); } catch (cause) { setError(cause instanceof Error ? cause.message : "Unable to delete this Ping."); } finally { setBusy(false); }
   };
 
   const rescindNomination = async () => {
@@ -157,6 +159,6 @@ export function PingCard({ ping, responses, currentPlayer, role, settings, metad
     {error && <div className="notice error" role="alert">{error}</div>}
     <div className="results">{renderResults()}</div>
     {replyAllowed && ping.type === "message" && <div className="button-row"><button className="secondary-button" disabled={busy} onClick={() => void startReply(false)}>Reply</button>{ping.content.allowReplyAll && <button className="secondary-button" disabled={busy} onClick={() => void startReply(true)}>Reply all</button>}</div>}
-    <footer className="card-actions"><span className="deletion-time">Deletes {new Date(ping.expiresAt).toLocaleString()}</span>{manager && <span className="card-action-buttons">{active && (ping.type === "vote" || ping.type === "nomination") && <button className="text-button" disabled={busy} onClick={() => void updateStatus("completed")}>End now</button>}{active && <button className="text-button danger" disabled={busy} onClick={() => void updateStatus("cancelled")}>Cancel</button>}{!active && <button className="text-button danger" disabled={busy} onClick={() => void deleteInteraction()}>Delete</button>}</span>}</footer>
+    <footer className="card-actions"><span className="deletion-time">Deletes {new Date(ping.expiresAt).toLocaleString()}</span>{(manager || !shared) && <span className="card-action-buttons">{manager && shared && active && (ping.type === "vote" || ping.type === "nomination") && <button className="text-button" disabled={busy} onClick={() => void updateStatus("completed")}>End now</button>}{manager && shared && active && <button className="text-button danger" disabled={busy} onClick={() => void updateStatus("cancelled")}>Cancel</button>}{!active && <button className="text-button danger" disabled={busy} onClick={() => void deleteInteraction()}>Delete</button>}</span>}</footer>
   </article>;
 }

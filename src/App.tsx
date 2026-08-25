@@ -10,6 +10,7 @@ import { SettingsPanel } from "./components/SettingsPanel";
 import { StatusPanel } from "./components/StatusPanel";
 import { useAutoHeight } from "./hooks/useAutoHeight";
 import { CatalogPanel } from "./components/CatalogPanel";
+import { deleteArchivedPing } from "./archive";
 
 type View = "inbox" | "create" | "catalogs" | "settings";
 
@@ -34,9 +35,11 @@ export default function App() {
   const acknowledgedBadgeIds = useRef(new Set<string>());
   const [now, setNow] = useState(Date.now());
   useEffect(() => { const timer = window.setInterval(() => setNow(Date.now()), 1000); return () => window.clearInterval(timer); }, []);
-  const waiting = useMemo(() => waitingPings(room.pings, room.responses, room.currentPlayer.id, now).sort((a, b) => a.deadlineAt - b.deadlineAt || a.createdAt - b.createdAt), [room.pings, room.responses, room.currentPlayer.id, now]);
+  const waiting = useMemo(() => waitingPings(room.sharedPings, room.sharedResponses, room.currentPlayer.id, now).sort((a, b) => a.deadlineAt - b.deadlineAt || a.createdAt - b.createdAt), [room.sharedPings, room.sharedResponses, room.currentPlayer.id, now]);
   const waitingIds = useMemo(() => new Set(waiting.map((ping) => ping.id)), [waiting]);
-  const recent = useMemo(() => room.pings.filter((ping) => !waitingIds.has(ping.id) && (ping.sender.id === room.currentPlayer.id || isRecipient(ping, room.currentPlayer.id) || room.responses.some((response) => response.pingId === ping.id && response.playerId === room.currentPlayer.id) || room.role === "GM")).sort((a, b) => b.createdAt - a.createdAt), [room.pings, room.responses, room.currentPlayer.id, room.role, waitingIds]);
+  const archivedIds = useMemo(() => new Set(room.archived.map((record) => record.ping.id)), [room.archived]);
+  const recent = useMemo(() => room.pings.filter((ping) => !waitingIds.has(ping.id) && (archivedIds.has(ping.id) || ping.sender.id === room.currentPlayer.id || isRecipient(ping, room.currentPlayer.id) || room.responses.some((response) => response.pingId === ping.id && response.playerId === room.currentPlayer.id))).sort((a, b) => b.createdAt - a.createdAt), [room.pings, room.responses, room.currentPlayer.id, waitingIds, archivedIds]);
+  const sharedIds = useMemo(() => new Set(room.sharedPings.map((ping) => ping.id)), [room.sharedPings]);
   const openReply = (next: MessagePrefill) => { setPrefill(next); setView("create"); };
   const openRunoff = (next: VotePrefill) => { setPrefill(next); setView("create"); };
   const changed = () => void room.refresh();
@@ -47,7 +50,7 @@ export default function App() {
   if (room.status === "connecting") return <StatusPanel title="Connecting to Owlbear Rodeo" message="Loading room participants and waiting Pings…" />;
   if (room.status === "error") return <StatusPanel title="Ping is unavailable" message={room.error ?? "Unable to connect to the room."} onRetry={() => void room.refresh()} />;
 
-  const renderCards = (items: PingRecord[], empty: string, notification = false) => items.length ? <div className="stack">{items.map((ping) => <PingCard key={ping.id} ping={ping} responses={room.responses} currentPlayer={room.currentPlayer} role={room.role} settings={room.settings} metadata={room.metadata} now={now} onReply={openReply} onRunoff={openRunoff} onResponseSubmitted={() => { acknowledgeBadge(ping.id); if (notification) closeNotificationPopover(); }} onChanged={changed} />)}</div> : <section className="empty-state"><img src="/icon.svg" alt="" /><h2>All clear</h2><p>{empty}</p></section>;
+  const renderCards = (items: PingRecord[], empty: string, notification = false) => items.length ? <div className="stack">{items.map((ping) => <PingCard key={ping.id} ping={ping} responses={room.responses} currentPlayer={room.currentPlayer} role={room.role} settings={room.settings} metadata={room.metadata} now={now} onReply={openReply} onRunoff={openRunoff} onResponseSubmitted={() => { acknowledgeBadge(ping.id); if (notification) closeNotificationPopover(); }} onChanged={changed} shared={sharedIds.has(ping.id)} onDeleteLocal={() => deleteArchivedPing(OBR.room.id, room.currentPlayer.id, ping.id).then(() => room.refreshArchive())} />)}</div> : <section className="empty-state"><img src="/icon.svg" alt="" /><h2>All clear</h2><p>{empty}</p></section>;
 
   if (focusedPingId) {
     const focused = room.pings.find((ping) => ping.id === focusedPingId);
@@ -61,7 +64,7 @@ export default function App() {
       {view === "inbox" && <div className="stack inbox">{waiting.length ? renderCards(waiting, "") : <section className="all-clear" role="status"><span aria-hidden="true">✓</span><strong>All clear</strong><small>No unread or unanswered Pings.</small></section>}<details className="recent-section"><summary><span>Recent</span><i className="recent-disclosure" aria-hidden="true">▼ ▼ ▼</i><b>{recent.length}</b></summary><div className="recent-content">{recent.length ? renderCards(recent, "") : <p className="muted">Nothing has been sent or received yet.</p>}</div></details></div>}
       {view === "create" && <ComposePing key={prefill ? prefill.kind === "message" ? `${prefill.source.id}-${prefill.replyAll}` : prefill.kind === "vote" ? `runoff-${prefill.sourceId}` : `catalog-${prefill.mode}-${prefill.item.id}` : "new"} role={room.role} currentPlayer={room.currentPlayer} players={prefill && "recipients" in prefill ? [...room.players, ...prefill.recipients] : room.players} settings={room.settings} metadata={room.metadata} prefill={prefill} onCreated={created} />}
       {view === "catalogs" && <CatalogPanel role={room.role} currentPlayer={room.currentPlayer} players={room.players} settings={room.settings} metadata={room.metadata} onOpen={(next) => { setPrefill(next); setView("create"); }} onChanged={changed} />}
-      {view === "settings" && <SettingsPanel role={room.role} settings={room.settings} pings={room.pings} metadata={room.metadata} onChanged={changed} />}
+      {view === "settings" && <SettingsPanel role={room.role} currentPlayerId={room.currentPlayer.id} roomId={OBR.room.id} settings={room.settings} pings={room.sharedPings} metadata={room.metadata} onChanged={changed} onArchiveChanged={() => void room.refreshArchive()} />}
     </div>
   </main>;
 }

@@ -3,6 +3,7 @@ import { EXTENSION_ID, METADATA_LIMIT_BYTES, PING_PREFIX, RESPONSE_PREFIX, SETTI
 export const SCHEMA_VERSION = 1 as const;
 export const DEFAULT_DEADLINE_MS = 5 * 60_000;
 export const DEFAULT_EXPIRY_MS = 24 * 60 * 60_000;
+export const TERMINAL_RETENTION_MS = 30_000;
 export type PingType = "quiz" | "vote" | "nomination" | "message";
 export type PingStatus = "active" | "completed" | "cancelled";
 export type ChoiceMode = "single" | "multiple";
@@ -146,7 +147,7 @@ export function parseSettings(value: unknown): RoomSettings {
 }
 
 export function parsePing(value: unknown): PingRecord | null {
-  if (!isObject(value) || value.schemaVersion !== SCHEMA_VERSION || !isString(value.id) || !["quiz", "vote", "nomination", "message"].includes(String(value.type)) || !isParticipant(value.sender) || !Array.isArray(value.recipients) || !value.recipients.every(isParticipant) || (value.recipients.length === 0 && value.includeFutureRecipients !== true) || (value.includeFutureRecipients !== undefined && typeof value.includeFutureRecipients !== "boolean") || !isFiniteNumber(value.createdAt) || !["active", "completed", "cancelled"].includes(String(value.status)) || !isObject(value.content) || (value.session !== undefined && !isPingSession(value.session))) return null;
+  if (!isObject(value) || value.schemaVersion !== SCHEMA_VERSION || !isString(value.id) || !["quiz", "vote", "nomination", "message"].includes(String(value.type)) || !isParticipant(value.sender) || !Array.isArray(value.recipients) || !value.recipients.every(isParticipant) || (value.recipients.length === 0 && value.includeFutureRecipients !== true) || (value.includeFutureRecipients !== undefined && typeof value.includeFutureRecipients !== "boolean") || !isFiniteNumber(value.createdAt) || (value.completedAt !== undefined && !isFiniteNumber(value.completedAt)) || (value.cancelledAt !== undefined && !isFiniteNumber(value.cancelledAt)) || !["active", "completed", "cancelled"].includes(String(value.status)) || !isObject(value.content) || (value.session !== undefined && !isPingSession(value.session))) return null;
   const legacy = value.deadlineAt === undefined;
   let expiresAt: number;
   let deadlineAt: number | undefined;
@@ -214,6 +215,7 @@ export const canCreate = (role: "GM" | "PLAYER", type: PingType, settings: RoomS
 export const canManage = (ping: PingRecord, playerId: string, role: "GM" | "PLAYER") => role === "GM" || ping.sender.id === playerId;
 export const isPastDeadline = (ping: PingRecord, now = Date.now()) => ping.status === "active" && now >= ping.deadlineAt;
 export const isDeletionDue = (ping: PingRecord, now = Date.now()) => now >= ping.expiresAt;
+export const isRetirementDue = (ping: PingRecord, now = Date.now()) => ping.status === "completed" ? now >= (ping.completedAt ?? ping.deadlineAt) + TERMINAL_RETENTION_MS : ping.status === "cancelled" ? now >= (ping.cancelledAt ?? ping.createdAt) + TERMINAL_RETENTION_MS : false;
 
 export function isComplete(ping: PingRecord, responses: PingResponse[], now = Date.now()) {
   if (ping.status !== "active") return true;

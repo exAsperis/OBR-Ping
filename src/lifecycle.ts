@@ -1,5 +1,5 @@
 import type { Metadata } from "@owlbear-rodeo/sdk";
-import { isComplete, isDeletionDue, parsePing, parseResponse, pingKey, responseKey, responsesFor, type PingRecord, type PingResponse } from "./domain";
+import { isComplete, isDeletionDue, isRetirementDue, parsePing, parseResponse, pingKey, responseKey, responsesFor, type PingRecord, type PingResponse } from "./domain";
 
 export function lifecycleUpdate(metadata: Metadata, now = Date.now()) {
   const responses: PingResponse[] = [];
@@ -14,7 +14,7 @@ export function lifecycleUpdate(metadata: Metadata, now = Date.now()) {
   }
   const update: Record<string, unknown> = {};
   for (const ping of pings) {
-    if (isDeletionDue(ping, now)) {
+    if (isDeletionDue(ping, now) || isRetirementDue(ping, now)) {
       update[pingKey(ping.id)] = undefined;
       for (const key of Object.keys(metadata)) if (key.startsWith(responseKey(ping.id, ""))) update[key] = undefined;
       continue;

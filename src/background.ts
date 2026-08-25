@@ -6,6 +6,7 @@ import { getNotificationPreference, getSeenPings, getSoundEnabled, setSeenPings 
 import { playPingSound } from "./sound";
 import { safeSetMetadata } from "./storage";
 import { progressHostSession, readSessionLock, stopSession } from "./session";
+import { archiveRoomState, claimArchiveFailureWarning } from "./archive";
 
 let processing = false;
 let initialized = false;
@@ -51,11 +52,16 @@ async function synchronize(providedMetadata?: Awaited<ReturnType<typeof OBR.room
   processing = true;
   try {
     let metadata = providedMetadata ?? await OBR.room.getMetadata();
-    const relevantBeforeCompletion = new Set(readRoomState(metadata).pings.filter((ping) => ping.status === "active" && isRecipient(ping, OBR.player.id)).map((ping) => ping.id));
+    const before = readRoomState(metadata);
+    try { await archiveRoomState(OBR.room.id, OBR.player.id, before.pings, before.responses); }
+    catch (cause) { if (claimArchiveFailureWarning()) await OBR.notification.show(`Ping could not save local history: ${cause instanceof Error ? cause.message : "unknown browser storage error"}`, "ERROR").catch(() => undefined); }
+    const relevantBeforeCompletion = new Set(before.pings.filter((ping) => ping.status === "active" && isRecipient(ping, OBR.player.id)).map((ping) => ping.id));
     const lifecycle = lifecycleUpdate(metadata);
     if (Object.keys(lifecycle).length) {
       await safeSetMetadata(lifecycle, metadata);
       metadata = projectedMetadata(metadata, lifecycle).metadata;
+      const projected = readRoomState(metadata);
+      await archiveRoomState(OBR.room.id, OBR.player.id, projected.pings, projected.responses).catch(() => undefined);
     }
     const { pings, responses } = readRoomState(metadata);
     const waiting = waitingPings(pings, responses, OBR.player.id);

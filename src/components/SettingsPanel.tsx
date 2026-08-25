@@ -1,12 +1,13 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { Metadata } from "@owlbear-rodeo/sdk";
 import { METADATA_LIMIT_BYTES } from "../constants";
 import { metadataBytes, pingMetadataBytes, type PingRecord, type PingType, type RoomSettings } from "../domain";
 import { getNotificationPreference, getSoundEnabled, setNotificationPreference, setSoundEnabled, type NotificationPreference } from "../preferences";
 import { removePings, saveSettings } from "../storage";
 import { Toggle } from "./Toggle";
+import { clearArchivedPings, getArchiveStats, subscribeArchiveChanges, type ArchiveStats } from "../archive";
 
-interface Props { role: "GM" | "PLAYER"; settings: RoomSettings; pings: PingRecord[]; metadata: Metadata; onChanged: () => void }
+interface Props { role: "GM" | "PLAYER"; currentPlayerId: string; roomId: string; settings: RoomSettings; pings: PingRecord[]; metadata: Metadata; onChanged: () => void; onArchiveChanged: () => void }
 const labels: Record<PingType, string> = { message: "Messages", vote: "Votes", quiz: "Quizzes", nomination: "Nominations" };
 const durationParts = (total: number) => ({ days: Math.floor(total / 1440), hours: Math.floor(total % 1440 / 60), minutes: total % 60 });
 
@@ -20,14 +21,18 @@ function DurationSetting({ label, total, onChange }: { label: string; total: num
   return <fieldset className="expiration-editor"><legend>{label}</legend><div className="duration-inputs"><label>Days<input aria-label={`${label} days`} type="number" min="0" step="1" value={parts.days || ""} onChange={(event) => update("days", event.target.value)} /></label><label>Hours<input aria-label={`${label} hours`} type="number" min="0" max="23" step="1" value={parts.hours || ""} onChange={(event) => update("hours", event.target.value)} /></label><label>Minutes<input aria-label={`${label} minutes`} type="number" min="0" max="59" step="1" value={parts.minutes || ""} onChange={(event) => update("minutes", event.target.value)} /></label></div></fieldset>;
 }
 
-export function SettingsPanel({ role, settings, pings, metadata, onChanged }: Props) {
+export function SettingsPanel({ role, currentPlayerId, roomId, settings, pings, metadata, onChanged, onArchiveChanged }: Props) {
   const [preference, setPreference] = useState<NotificationPreference>(getNotificationPreference);
   const [sound, setSound] = useState(getSoundEnabled);
   const [draft, setDraft] = useState(settings);
   const saveQueue = useRef(Promise.resolve());
   useEffect(() => setDraft(settings), [settings]);
   const [busy, setBusy] = useState(false);
+  const [archiveBusy, setArchiveBusy] = useState(false);
+  const [archiveStats, setArchiveStats] = useState<ArchiveStats>({ count: 0, bytes: 0 });
   const [message, setMessage] = useState<string | null>(null);
+  const refreshArchiveStats = useCallback(() => getArchiveStats(roomId, currentPlayerId).then(setArchiveStats).catch(() => setMessage("Local history is unavailable on this device.")), [roomId, currentPlayerId]);
+  useEffect(() => { void refreshArchiveStats(); return subscribeArchiveChanges(() => void refreshArchiveStats()); }, [refreshArchiveStats]);
   const total = metadataBytes(metadata), own = pingMetadataBytes(metadata), remaining = Math.max(0, METADATA_LIMIT_BYTES - total);
   const changePreference = (value: NotificationPreference) => { setPreference(value); setNotificationPreference(value); setMessage("Notification preference saved on this device."); };
   const updateRoomSettings = (next: RoomSettings) => {
@@ -43,15 +48,26 @@ export function SettingsPanel({ role, settings, pings, metadata, onChanged }: Pr
     if (!window.confirm(all ? "Delete every Ping and response in this room?" : "Delete every completed and cancelled Ping?")) return;
     setBusy(true); try { await removePings(targets, metadata); setMessage(`${targets.length} interaction${targets.length === 1 ? "" : "s"} removed.`); onChanged(); } catch (cause) { setMessage(cause instanceof Error ? cause.message : "Unable to clear room data."); } finally { setBusy(false); }
   };
+  const clearLocal = async (mode: "expired" | "all") => {
+    if (mode === "all" && !window.confirm("Delete all Ping history stored on this device for this room?")) return;
+    setArchiveBusy(true);
+    try {
+      const removed = await clearArchivedPings(roomId, currentPlayerId, mode);
+      setMessage(removed ? `${removed} local histor${removed === 1 ? "y record" : "y records"} removed.` : "There is no matching local history to clear.");
+      await refreshArchiveStats(); onArchiveChanged();
+    } catch (cause) { setMessage(cause instanceof Error ? cause.message : "Unable to clear local history."); }
+    finally { setArchiveBusy(false); }
+  };
   return <div className="stack">
     <section className="panel stack compact"><span className="eyebrow">This device</span><h2>Incoming Pings</h2><label>Notification behavior<select value={preference} onChange={(event) => changePreference(event.target.value as NotificationPreference)}><option value="popover">Separate popover (recommended)</option><option value="badge-toast">Badge + toast</option><option value="badge">Badge only</option><option value="auto-open">Automatically open Ping</option></select></label><Toggle checked={sound} onChange={(checked) => { setSound(checked); setSoundEnabled(checked); setMessage("Sound preference saved on this device."); }} label="Play delivery sound" description="Play a short ping when a new Ping arrives." /><p className="muted">The separate popover also shows completed quiz, vote, and nomination results. These settings are stored only in this browser.</p></section>
+    <section className="panel stack compact"><span className="eyebrow">This device</span><h2>Local history</h2><dl className="facts"><div><dt>Archived Pings</dt><dd>{archiveStats.count.toLocaleString()}</dd></div><div><dt>Estimated size</dt><dd>{archiveStats.bytes.toLocaleString()} B</dd></div></dl><p className="muted">Recent history is stored only in this browser profile and is automatically removed at each Ping's automatic-deletion time.</p><div className="button-row"><button className="secondary-button" disabled={archiveBusy} onClick={() => void clearLocal("expired")}>Clear expired</button><button className="danger-button" disabled={archiveBusy || archiveStats.count === 0} onClick={() => void clearLocal("all")}>Clear all local history</button></div></section>
     {role === "GM" ? <>
       <section className="panel stack compact"><span className="eyebrow">Room controls</span><h2>Player creation</h2><Toggle checked={draft.allowPlayers} onChange={(allowPlayers) => updateRoomSettings({ ...draft, allowPlayers })} label="Allow players to create interactions" description="The GM can always create every Ping type." /><div className="choice-list">{(Object.keys(labels) as PingType[]).map((type) => <Toggle key={type} disabled={!draft.allowPlayers} checked={draft.allowedTypes[type]} onChange={(checked) => updateRoomSettings({ ...draft, allowedTypes: { ...draft.allowedTypes, [type]: checked } })} label={labels[type]} />)}</div></section>
       <section className="panel stack compact"><span className="eyebrow">Room controls</span><h2>Player catalogs</h2><Toggle checked={draft.allowPlayerCatalogs} onChange={(allowPlayerCatalogs) => updateRoomSettings({ ...draft, allowPlayerCatalogs })} label="Allow players to create catalogs" description="Players can inspect and delete existing local catalogs when disabled." /><Toggle checked={draft.allowPlayerSessions} onChange={(allowPlayerSessions) => updateRoomSettings({ ...draft, allowPlayerSessions })} label="Allow players to start sessions" description="Starting a session also requires permission for its Ping type." /></section>
       <section className="panel stack compact"><span className="eyebrow">Room controls</span><h2>Timing defaults</h2><DurationSetting label="Event deadline" total={draft.defaultDeadlineMinutes} onChange={(defaultDeadlineMinutes) => updateRoomSettings({ ...draft, defaultDeadlineMinutes })} /><DurationSetting label="Automatic deletion" total={draft.defaultExpiryMinutes} onChange={(defaultExpiryMinutes) => updateRoomSettings({ ...draft, defaultExpiryMinutes })} /><p className="muted">These values prefill new Pings. Senders can adjust them before sending.</p></section>
-      <section className="panel stack compact"><span className="eyebrow">Room metadata</span><h2>Storage meter</h2><div className="meter" aria-label={`${total} of ${METADATA_LIMIT_BYTES} bytes used`}><span style={{ width: `${Math.min(100, total / METADATA_LIMIT_BYTES * 100)}%` }} /></div><dl className="facts"><div><dt>Total used</dt><dd>{total.toLocaleString()} B</dd></div><div><dt>Used by Ping</dt><dd>{own.toLocaleString()} B</dd></div><div><dt>Estimated remaining</dt><dd>{remaining.toLocaleString()} B</dd></div></dl><p className="muted">Owlbear shares this 16 KB budget with every extension in the room.</p><div className="button-row"><button className="secondary-button" disabled={busy} onClick={() => void clear(false)}>Clear finished</button><button className="danger-button" disabled={busy} onClick={() => void clear(true)}>Clear all</button></div></section>
+      <section className="panel stack compact"><span className="eyebrow">Room metadata</span><h2>Active/shared storage</h2><div className="meter" aria-label={`${total} of ${METADATA_LIMIT_BYTES} bytes used`}><span style={{ width: `${Math.min(100, total / METADATA_LIMIT_BYTES * 100)}%` }} /></div><dl className="facts"><div><dt>Total room use</dt><dd>{total.toLocaleString()} B</dd></div><div><dt>Shared Ping data</dt><dd>{own.toLocaleString()} B</dd></div><div><dt>Estimated remaining</dt><dd>{remaining.toLocaleString()} B</dd></div></dl><p className="muted">Active Pings and briefly retained results use Owlbear's shared 16 KB room budget. Local history above does not.</p><div className="button-row"><button className="secondary-button" disabled={busy} onClick={() => void clear(false)}>Clear finished</button><button className="danger-button" disabled={busy} onClick={() => void clear(true)}>Clear all</button></div></section>
     </> : <section className="panel"><span className="eyebrow">Room controls</span><h2>GM managed</h2><p className="muted">Only the GM can change creation permissions or clear shared room data.</p></section>}
     {message && <div className="notice" role="status">{message}</div>}
-    <section className="panel"><span className="eyebrow">Privacy</span><h2>Room-visible data</h2><p className="muted">Pings and responses are stored in Owlbear room metadata. Vote choices are hidden by this interface, but technically capable room participants can inspect metadata.</p></section>
+    <section className="panel"><span className="eyebrow">Privacy</span><h2>Shared and local data</h2><p className="muted">Active Pings and responses are visible in Owlbear room metadata. Vote choices are hidden by this interface, but technically capable room participants can inspect metadata. After completion, Recent history is retained only on each relevant participant's device.</p></section>
   </div>;
 }

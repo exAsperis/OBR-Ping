@@ -2,6 +2,7 @@ import OBR, { type Metadata, type Player } from "@owlbear-rodeo/sdk";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { readRoomState, type Participant } from "../domain";
 import { applyOwlbearTheme } from "../theme";
+import { getArchivedPings, mergeSharedAndArchived, subscribeArchiveChanges, type ArchivedPingRecord, type ArchiveStatus } from "../archive";
 
 export type ConnectionStatus = "connecting" | "ready" | "error";
 
@@ -11,8 +12,17 @@ export function usePingRoom() {
   const [currentPlayer, setCurrentPlayer] = useState<Participant>({ id: "", name: "" });
   const [players, setPlayers] = useState<Participant[]>([]);
   const [metadata, setMetadata] = useState<Metadata>({});
+  const [archived, setArchived] = useState<ArchivedPingRecord[]>([]);
+  const [archiveStatus, setArchiveStatus] = useState<ArchiveStatus>("ready");
   const [error, setError] = useState<string | null>(null);
   const active = useRef(false);
+  const playerId = useRef("");
+
+  const refreshArchive = useCallback(async (id = playerId.current) => {
+    if (!id || !OBR.room.id) return;
+    try { const records = await getArchivedPings(OBR.room.id, id); if (active.current) { setArchived(records); setArchiveStatus("ready"); } }
+    catch { if (active.current) setArchiveStatus("unavailable"); /* Background reports the one-time device warning. */ }
+  }, []);
 
   const setParty = useCallback((party: Player[], self: Participant) => {
     const all = [self, ...party.map((player) => ({ id: player.id, name: player.name || "Unnamed player", color: player.color }))];
@@ -23,8 +33,9 @@ export function usePingRoom() {
     const [nextRole, name, color, party, roomMetadata] = await Promise.all([OBR.player.getRole(), OBR.player.getName(), OBR.player.getColor(), OBR.party.getPlayers(), OBR.room.getMetadata()]);
     if (!active.current) return;
     const self = { id: OBR.player.id, name: name || "Unnamed player", color };
-    setRole(nextRole); setCurrentPlayer(self); setParty(party, self); setMetadata(roomMetadata); setError(null); setStatus("ready");
-  }, [setParty]);
+    playerId.current = self.id;
+    setRole(nextRole); setCurrentPlayer(self); setParty(party, self); setMetadata(roomMetadata); await refreshArchive(self.id); setError(null); setStatus("ready");
+  }, [refreshArchive, setParty]);
 
   useEffect(() => {
     active.current = true;
@@ -42,12 +53,14 @@ export function usePingRoom() {
         cleanups.push(OBR.room.onMetadataChange(setMetadata));
         cleanups.push(OBR.party.onChange(() => void refresh()));
         cleanups.push(OBR.player.onChange(() => void refresh()));
+        cleanups.push(subscribeArchiveChanges(() => void refreshArchive()));
         await refresh();
       } catch (cause) { if (active.current) { setError(cause instanceof Error ? cause.message : "Unable to connect to Owlbear Rodeo."); setStatus("error"); } }
     });
     return () => { active.current = false; window.clearTimeout(timeout); cleanups.splice(0).forEach((cleanup) => cleanup()); };
-  }, [refresh, setParty]);
+  }, [refresh, refreshArchive, setParty]);
 
-  const room = useMemo(() => readRoomState(metadata), [metadata]);
-  return { status, role, currentPlayer, players, metadata, error, refresh, ...room };
+  const shared = useMemo(() => readRoomState(metadata), [metadata]);
+  const merged = useMemo(() => mergeSharedAndArchived(shared.pings, shared.responses, archived), [shared.pings, shared.responses, archived]);
+  return { status, role, currentPlayer, players, metadata, error, refresh, refreshArchive, archived, archiveStatus, sharedPings: shared.pings, sharedResponses: shared.responses, settings: shared.settings, ...merged };
 }

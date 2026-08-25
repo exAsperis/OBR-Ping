@@ -11,3 +11,6 @@ export const NOTIFICATION_POPOVER_ID = `${EXTENSION_ID}/notification-popover`;
 export const CATALOGS_KEY = `${EXTENSION_ID}/catalogs`;
 export const HOST_SESSION_KEY = `${EXTENSION_ID}/host-session`;
 export const SESSION_LOCK_KEY = `${EXTENSION_ID}/session`;
+export const ARCHIVE_DB_NAME = `${EXTENSION_ID}/archive`;
+export const ARCHIVE_CHANNEL = `${EXTENSION_ID}/archive-events`;
+export const ARCHIVE_WARNING_KEY = `${EXTENSION_ID}/archive-warning-shown`;

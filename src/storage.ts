@@ -1,7 +1,8 @@
 import OBR from "@owlbear-rodeo/sdk";
 import type { Metadata } from "@owlbear-rodeo/sdk";
 import { METADATA_LIMIT_BYTES, SETTINGS_KEY } from "./constants";
-import { pingKey, projectedMetadata, responseKey, type PingRecord, type PingResponse, type RoomSettings } from "./domain";
+import { pingKey, projectedMetadata, readRoomState, responseKey, type PingRecord, type PingResponse, type RoomSettings } from "./domain";
+import { archiveRoomState, claimArchiveFailureWarning } from "./archive";
 
 export class CapacityError extends Error {
   constructor(public readonly projectedBytes: number) {
@@ -9,10 +10,29 @@ export class CapacityError extends Error {
   }
 }
 
+export function fitMetadataUpdate(metadata: Metadata, requested: Record<string, unknown>) {
+  let projected = projectedMetadata(metadata, requested);
+  if (projected.fits) return requested;
+  const room = readRoomState(metadata);
+  const eviction: Record<string, unknown> = {};
+  const finished = room.pings.filter((ping) => ping.status !== "active").sort((a, b) => (a.completedAt ?? a.cancelledAt ?? a.createdAt) - (b.completedAt ?? b.cancelledAt ?? b.createdAt));
+  for (const ping of finished) {
+    eviction[pingKey(ping.id)] = undefined;
+    for (const key of Object.keys(metadata)) if (key.startsWith(responseKey(ping.id, ""))) eviction[key] = undefined;
+    projected = projectedMetadata(metadata, { ...eviction, ...requested });
+    if (projected.fits) return { ...eviction, ...requested };
+  }
+  throw new CapacityError(projected.bytes);
+}
+
 export async function safeSetMetadata(update: Record<string, unknown>, current?: Metadata) {
   const metadata = current ?? await OBR.room.getMetadata();
-  const projected = projectedMetadata(metadata, update);
-  if (!projected.fits) throw new CapacityError(projected.bytes);
+  if (!projectedMetadata(metadata, update).fits) {
+    const room = readRoomState(metadata);
+    try { await archiveRoomState(OBR.room.id, OBR.player.id, room.pings, room.responses); }
+    catch (cause) { if (claimArchiveFailureWarning()) await OBR.notification.show(`Ping could not save local history: ${cause instanceof Error ? cause.message : "unknown browser storage error"}`, "ERROR").catch(() => undefined); }
+    update = fitMetadataUpdate(metadata, update);
+  }
   await OBR.room.setMetadata(update);
 }
 
