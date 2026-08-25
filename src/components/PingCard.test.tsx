@@ -33,4 +33,13 @@ describe("PingCard", () => {
     expect(screen.getByRole("button", { name: "Reply all" })).toBeTruthy();
     expect(screen.getByText("Read by 0/1")).toBeTruthy();
   });
+
+  it("labels an answered completed interaction as Results", () => {
+    const gm = { id: "gm", name: "GM" }, player = { id: "p", name: "Player" };
+    const ping: VotePing = { schemaVersion: 1, id: "v", type: "vote", sender: gm, recipients: [player], createdAt: 1, deadlineAt: 100, expiresAt: 1_000, status: "completed", completedAt: 3, content: { question: "Where?", mode: "single", options: [{ id: "a", label: "A" }, { id: "b", label: "B" }] } };
+    const responses: PingResponse[] = [{ schemaVersion: 1, pingId: "v", playerId: "p", playerName: "Player", respondedAt: 2, type: "vote", optionIds: ["a"] }];
+    render(<PingCard ping={ping} responses={responses} currentPlayer={player} role="PLAYER" settings={DEFAULT_SETTINGS} metadata={{}} now={4} onReply={() => undefined} onRunoff={() => undefined} onChanged={() => undefined} />);
+    expect(screen.getByText("Results")).toBeTruthy();
+    expect(screen.queryByText("Response received")).toBeNull();
+  });
 });

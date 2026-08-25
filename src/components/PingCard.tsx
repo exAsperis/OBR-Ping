@@ -16,12 +16,13 @@ interface Props {
   now: number;
   onReply: (prefill: MessagePrefill) => void;
   onRunoff: (prefill: VotePrefill) => void;
+  onMessageRead?: () => void;
   onChanged: () => void;
 }
 
 const typeLabel = { quiz: "Quiz", vote: "Vote", nomination: "Nomination", message: "Message" } as const;
 
-export function PingCard({ ping, responses, currentPlayer, role, settings, metadata, now, onReply, onRunoff, onChanged }: Props) {
+export function PingCard({ ping, responses, currentPlayer, role, settings, metadata, now, onReply, onRunoff, onMessageRead, onChanged }: Props) {
   const existing = responseFor(responses, ping.id, currentPlayer.id);
   const relevant = responsesFor(responses, ping.id);
   const manager = canManage(ping, currentPlayer.id, role);
@@ -52,7 +53,7 @@ export function PingCard({ ping, responses, currentPlayer, role, settings, metad
       if (!value || /[\r\n]/.test(value)) { setError("Enter one single-line nomination."); return; }
       response = { schemaVersion: SCHEMA_VERSION, pingId: ping.id, playerId: currentPlayer.id, playerName: currentPlayer.name, respondedAt: Date.now(), type: "nomination", value };
     } else response = { schemaVersion: SCHEMA_VERSION, pingId: ping.id, playerId: currentPlayer.id, playerName: currentPlayer.name, respondedAt: Date.now(), type: "message", read: true };
-    setBusy(true); try { await saveResponse(response, metadata); onChanged(); } catch (cause) { setError(cause instanceof Error ? cause.message : "Unable to save your response."); } finally { setBusy(false); }
+    setBusy(true); try { await saveResponse(response, metadata); onChanged(); if (ping.type === "message") onMessageRead?.(); } catch (cause) { setError(cause instanceof Error ? cause.message : "Unable to save your response."); } finally { setBusy(false); }
   };
 
   const updateStatus = async (status: "completed" | "cancelled") => {
@@ -97,7 +98,7 @@ export function PingCard({ ping, responses, currentPlayer, role, settings, metad
 
   const renderResponse = () => {
     if (!recipient) return null;
-    if (existing) return <div className="notice success" role="status">{ping.type === "message" ? "Read" : "Response received"}</div>;
+    if (existing) return <div className="notice success" role="status">{ping.type === "message" ? "Read" : ping.status === "completed" || deadlinePassed ? "Results" : "Response received"}</div>;
     if (!active) return null;
     if (ping.type === "message") return <button className="primary-button" disabled={busy} onClick={() => void respond()}>Mark as read</button>;
     if (ping.type === "nomination") return <div className="stack compact"><label>Your nomination<input maxLength={160} value={nomination} onChange={(event) => setNomination(event.target.value.replace(/[\r\n]/g, ""))} /></label><span className="counter">{nomination.length}/160</span><button className="primary-button" disabled={busy} onClick={() => void respond()}>Submit nomination</button></div>;
