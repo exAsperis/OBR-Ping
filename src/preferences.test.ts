@@ -3,8 +3,8 @@ import { getNotificationPreference, getSeenPings, getSoundEnabled, setNotificati
 
 describe("local preferences", () => {
   beforeEach(() => localStorage.clear());
-  it("defaults to badge and toast and persists an override", () => {
-    expect(getNotificationPreference()).toBe("badge-toast");
+  it("defaults to a separate popover and persists an override", () => {
+    expect(getNotificationPreference()).toBe("popover");
     setNotificationPreference("auto-open");
     expect(getNotificationPreference()).toBe("auto-open");
   });

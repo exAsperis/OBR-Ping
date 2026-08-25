@@ -28,6 +28,7 @@ h3 { font-size: 1rem; margin-bottom: .35rem; line-height: 1.35; }
 .content { padding: .8rem; }
 .stack { display: flex; flex-direction: column; gap: .75rem; }.stack.compact { gap: .55rem; }
 .panel, .ping-card, .empty-state { background: var(--paper); border: 1px solid var(--border); border-radius: 16px; box-shadow: var(--shadow); padding: 1rem; }
+.notification-shell { min-height: 100vh; }
 .panel > :last-child, .ping-card > :last-child { margin-bottom: 0; }
 .section-heading, .ping-card header, .button-row, .card-actions { display: flex; align-items: center; justify-content: space-between; gap: .7rem; }
 .segmented { display: grid; grid-template-columns: repeat(4, 1fr); gap: .25rem; padding: .25rem; background: color-mix(in srgb, var(--text) 7%, transparent); border-radius: 12px; }

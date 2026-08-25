@@ -1,12 +1,12 @@
 import { PREFERENCE_KEY, SEEN_KEY, SOUND_KEY } from "./constants";
 
-export type NotificationPreference = "badge-toast" | "badge" | "auto-open";
+export type NotificationPreference = "popover" | "badge-toast" | "badge" | "auto-open";
 
 export function getNotificationPreference(): NotificationPreference {
   try {
     const value = localStorage.getItem(PREFERENCE_KEY);
-    return value === "badge" || value === "auto-open" || value === "badge-toast" ? value : "badge-toast";
-  } catch { return "badge-toast"; }
+    return value === "popover" || value === "badge" || value === "auto-open" || value === "badge-toast" ? value : "popover";
+  } catch { return "popover"; }
 }
 
 export function setNotificationPreference(value: NotificationPreference) {

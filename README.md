@@ -10,7 +10,7 @@ Ping for Owlbear Rodeo sends short, focused interactions to everyone in a room, 
 - Single-choice and instant-runoff ranked-choice Votes
 - Single-line Nominations that the sender can curate into a separate Vote
 - Discrete Messages with read state, optional expiration, Reply, and Reply All
-- Background action badges and configurable toast or auto-open behavior
+- Background action badges and configurable separate-popover, toast, or auto-open behavior
 - GM-controlled player creation permissions and room metadata cleanup
 - Full operation with or without an open scene
 
