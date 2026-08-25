@@ -12,7 +12,8 @@ describe("ComposePing", () => {
     expect(screen.getByText("Player")).toBeTruthy();
     expect(screen.getByText("Player").parentElement?.querySelector<HTMLElement>(".player-dot")?.style.backgroundColor).toBe("rgb(25, 169, 116)");
     const message = screen.getByLabelText("Message") as HTMLTextAreaElement;
-    expect(message.maxLength).toBe(1000);
+    expect(message.maxLength).toBe(300);
+    expect(message.rows).toBe(3);
     expect(screen.getByText(/Players cannot reply right now/)).toBeTruthy();
     expect(screen.getByLabelText("Allow reply").nextElementSibling?.classList.contains("toggle-track")).toBe(true);
     fireEvent.click(screen.getByRole("button", { name: "Quiz" }));
@@ -20,7 +21,7 @@ describe("ComposePing", () => {
     expect(screen.getByText("Options")).toBeTruthy();
     expect(screen.getAllByRole("button", { name: "From time of sending" }).every((button) => button.classList.contains("active"))).toBe(true);
     expect((screen.getByLabelText("Deadline minutes") as HTMLInputElement).value).toBe("5");
-    expect((screen.getByLabelText("Automatic deletion days") as HTMLInputElement).value).toBe("7");
+    expect((screen.getByLabelText("Automatic deletion days") as HTMLInputElement).value).toBe("1");
     fireEvent.click(screen.getAllByRole("button", { name: "Specific date/time" })[0]);
     expect(screen.getByLabelText("Deadline date and time")).toBeTruthy();
   });

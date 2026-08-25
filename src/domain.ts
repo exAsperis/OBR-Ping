@@ -2,7 +2,7 @@ import { EXTENSION_ID, METADATA_LIMIT_BYTES, PING_PREFIX, RESPONSE_PREFIX, SETTI
 
 export const SCHEMA_VERSION = 1 as const;
 export const DEFAULT_DEADLINE_MS = 5 * 60_000;
-export const DEFAULT_EXPIRY_MS = 7 * 24 * 60 * 60_000;
+export const DEFAULT_EXPIRY_MS = 24 * 60 * 60_000;
 export type PingType = "quiz" | "vote" | "nomination" | "message";
 export type PingStatus = "active" | "completed" | "cancelled";
 export type ChoiceMode = "single" | "multiple";
@@ -23,12 +23,16 @@ export interface RoomSettings {
   schemaVersion: 1;
   allowPlayers: boolean;
   allowedTypes: Record<PingType, boolean>;
+  defaultDeadlineMinutes: number;
+  defaultExpiryMinutes: number;
 }
 
 export const DEFAULT_SETTINGS: RoomSettings = {
   schemaVersion: SCHEMA_VERSION,
   allowPlayers: false,
   allowedTypes: { quiz: false, vote: false, nomination: false, message: false },
+  defaultDeadlineMinutes: DEFAULT_DEADLINE_MS / 60_000,
+  defaultExpiryMinutes: DEFAULT_EXPIRY_MS / 60_000,
 };
 
 interface BasePing {
@@ -119,7 +123,9 @@ export function parseSettings(value: unknown): RoomSettings {
   if (!isObject(value) || value.schemaVersion !== SCHEMA_VERSION || typeof value.allowPlayers !== "boolean" || !isObject(value.allowedTypes)) return DEFAULT_SETTINGS;
   const allowedTypes = value.allowedTypes;
   if (["quiz", "vote", "nomination", "message"].some((type) => typeof allowedTypes[type] !== "boolean")) return DEFAULT_SETTINGS;
-  return value as unknown as RoomSettings;
+  const defaultDeadlineMinutes = isFiniteNumber(value.defaultDeadlineMinutes) && Number.isSafeInteger(value.defaultDeadlineMinutes) && value.defaultDeadlineMinutes > 0 ? value.defaultDeadlineMinutes : DEFAULT_SETTINGS.defaultDeadlineMinutes;
+  const defaultExpiryMinutes = isFiniteNumber(value.defaultExpiryMinutes) && Number.isSafeInteger(value.defaultExpiryMinutes) && value.defaultExpiryMinutes > defaultDeadlineMinutes ? value.defaultExpiryMinutes : Math.max(DEFAULT_SETTINGS.defaultExpiryMinutes, defaultDeadlineMinutes + 1);
+  return { ...value, defaultDeadlineMinutes, defaultExpiryMinutes } as unknown as RoomSettings;
 }
 
 export function parsePing(value: unknown): PingRecord | null {

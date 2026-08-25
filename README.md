@@ -54,7 +54,7 @@ pnpm run build
 
 Ping has no backend. Its interactions and responses are stored in Owlbear room metadata under `com.ex-asperis.obr-ping`, and device notification preferences remain in extension-origin browser storage.
 
-Owlbear room metadata is limited to 16 KB across all extensions. Ping checks the projected size before writes and gives the GM a meter showing total room usage, Ping usage, and estimated remaining capacity. Every Ping has a configurable deletion time (seven days after sending by default), when it and its responses are automatically removed. The GM and interaction senders also have explicit cleanup controls.
+Owlbear room metadata is limited to 16 KB across all extensions. Ping checks the projected size before writes and gives the GM a meter showing total room usage, Ping usage, and estimated remaining capacity. Every Ping has a configurable deletion time (24 hours after sending by default), when it and its responses are automatically removed. The GM can configure room defaults for deadlines and deletion, and the GM and interaction senders also have explicit cleanup controls.
 
 Vote choices are secret in the Ping interface: results never reveal voter-to-ballot mappings. Owlbear metadata is technically inspectable by room participants, so this is not cryptographic secrecy. Reliability is limited to Owlbear room metadata and stable Owlbear player IDs; there is no cross-room archive or trusted external clock.
 

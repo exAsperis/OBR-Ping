@@ -24,6 +24,11 @@ describe("runtime validation", () => {
     expect(state.responses).toEqual([response]);
   });
 
+  it("normalizes legacy room settings with the current timing defaults", () => {
+    const legacy = { schemaVersion: 1, allowPlayers: true, allowedTypes: DEFAULT_SETTINGS.allowedTypes };
+    expect(parseSettings(legacy)).toMatchObject({ allowPlayers: true, defaultDeadlineMinutes: 5, defaultExpiryMinutes: 1440 });
+  });
+
   it("normalizes a legacy interaction expiry into a deadline plus retention", () => {
     const { deadlineAt: _deadline, expiresAt: _expiry, ...legacy } = quiz;
     const parsed = parsePing({ ...legacy, expiresAt: 61_000 });
