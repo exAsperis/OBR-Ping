@@ -14,3 +14,5 @@ export const SESSION_LOCK_KEY = `${EXTENSION_ID}/session`;
 export const ARCHIVE_DB_NAME = `${EXTENSION_ID}/archive`;
 export const ARCHIVE_CHANNEL = `${EXTENSION_ID}/archive-events`;
 export const ARCHIVE_WARNING_KEY = `${EXTENSION_ID}/archive-warning-shown`;
+export const EXTERNAL_MESSAGE_REQUEST_CHANNEL = `${EXTENSION_ID}/api/v1/message`;
+export const EXTERNAL_MESSAGE_RESULT_CHANNEL = `${EXTENSION_ID}/api/v1/message-result`;

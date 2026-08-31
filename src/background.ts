@@ -1,12 +1,13 @@
 import OBR from "@owlbear-rodeo/sdk";
-import { isRecipient, projectedMetadata, readRoomState, responseFor, waitingPings, type PingRecord } from "./domain";
+import { isRecipient, projectedMetadata, readRoomState, responseFor, waitingPings, type Participant, type PingRecord } from "./domain";
 import { lifecycleUpdate } from "./lifecycle";
-import { NOTIFICATION_POPOVER_ID } from "./constants";
+import { EXTERNAL_MESSAGE_REQUEST_CHANNEL, EXTERNAL_MESSAGE_RESULT_CHANNEL, NOTIFICATION_POPOVER_ID } from "./constants";
 import { getNotificationPreference, getSeenPings, getSoundEnabled, setSeenPings } from "./preferences";
 import { playPingSound } from "./sound";
-import { safeSetMetadata } from "./storage";
+import { CapacityError, safeSetMetadata, savePing } from "./storage";
 import { progressHostSession, readSessionLock, stopSession } from "./session";
 import { archiveRoomState, claimArchiveFailureWarning } from "./archive";
+import { buildExternalMessage, ExternalMessageError, requestIdFrom, type ExternalMessageResultV1 } from "./externalMessageApi";
 
 let processing = false;
 let initialized = false;
@@ -15,6 +16,30 @@ let previouslyRelevant = new Set<string>();
 let notificationPingId: string | null = null;
 const shownSessionResults = new Set<string>();
 const warnedPopoverFailures = new Set<string>();
+let externalMessageQueue = Promise.resolve();
+
+async function sendExternalMessageResult(result: ExternalMessageResultV1) {
+  await OBR.broadcast.sendMessage(EXTERNAL_MESSAGE_RESULT_CHANNEL, result, { destination: "LOCAL" });
+}
+
+async function handleExternalMessageRequest(data: unknown) {
+  const requestId = requestIdFrom(data);
+  try {
+    const [role, name, color, party, metadata] = await Promise.all([OBR.player.getRole(), OBR.player.getName(), OBR.player.getColor(), OBR.party.getPlayers(), OBR.room.getMetadata()]);
+    const sender: Participant = { id: OBR.player.id, name: name || "Unnamed player", color };
+    const players: Participant[] = party.map((player) => ({ id: player.id, name: player.name || "Unnamed player", color: player.color }));
+    const ping = buildExternalMessage(data, { role, sender, players, settings: readRoomState(metadata).settings });
+    await savePing(ping, metadata);
+    await sendExternalMessageResult({ version: 1, requestId, status: "accepted", pingId: ping.id });
+  } catch (cause) {
+    const result: ExternalMessageResultV1 = cause instanceof ExternalMessageError
+      ? { version: 1, requestId, status: "rejected", code: cause.code, message: cause.message }
+      : cause instanceof CapacityError
+        ? { version: 1, requestId, status: "rejected", code: "CAPACITY_EXCEEDED", message: cause.message }
+        : { version: 1, requestId, status: "rejected", code: "WRITE_FAILED", message: cause instanceof Error ? cause.message : "Unable to create the requested Message Ping." };
+    await sendExternalMessageResult(result).catch(() => undefined);
+  }
+}
 
 function notificationUrl(pingId: string) {
   const url = new URL("extension.html", window.location.href);
@@ -99,6 +124,12 @@ async function synchronize(providedMetadata?: Awaited<ReturnType<typeof OBR.room
 OBR.onReady(() => {
   void synchronize();
   const unsubscribe = OBR.room.onMetadataChange((metadata) => void synchronize(metadata));
+  let connectionId = "";
+  void OBR.player.getConnectionId().then((id) => { connectionId = id; });
+  const unsubscribeExternalMessages = OBR.broadcast.onMessage(EXTERNAL_MESSAGE_REQUEST_CHANNEL, (event) => {
+    if (!connectionId || event.connectionId !== connectionId) return;
+    externalMessageQueue = externalMessageQueue.then(() => handleExternalMessageRequest(event.data));
+  });
   const timer = window.setInterval(() => void synchronize(), 1000);
-  window.addEventListener("beforeunload", () => { unsubscribe(); window.clearInterval(timer); }, { once: true });
+  window.addEventListener("beforeunload", () => { unsubscribe(); unsubscribeExternalMessages(); window.clearInterval(timer); }, { once: true });
 });
